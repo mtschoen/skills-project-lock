@@ -1,0 +1,2 @@
+# Runtime files outside the default skill allowlist.
+# None currently: scripts/ is installed by default.

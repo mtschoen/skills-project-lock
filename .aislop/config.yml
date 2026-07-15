@@ -1,0 +1,6 @@
+version: 1
+telemetry: false
+ci:
+  failBelow: 100
+exclude:
+  - workspace/**
