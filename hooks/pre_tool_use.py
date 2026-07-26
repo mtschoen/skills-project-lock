@@ -12,16 +12,33 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from project_lock.core import governing_lock, nearest_worktree_root
+from project_lock.core import (
+    MARKER_DIRECTORY_NAME,
+    governing_lock,
+    nearest_worktree_root,
+    read_json,
+    state_directory,
+    valid_metadata,
+)
 
 FILE_TOOL_PATH_KEYS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
 ALLOW = 0
 DENY = 2
+READ_ONLY_COMMANDS = frozenset(
+    {"ls", "cat", "head", "tail", "grep", "rg", "pwd", "echo", "which", "type"}
+)
+GIT_READ_SUBCOMMANDS = frozenset({"status", "log", "diff", "show", "ls-files", "rev-parse"})
+FIND_MUTATING_FLAGS = frozenset(
+    {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+)
+SEGMENT_SPLIT_PATTERN = re.compile(r"[;&|\n\r]+")
+PATH_TOKEN_PATTERN = re.compile(r"[A-Za-z]:[\\/][^\s'\"]+|/[^\s'\"]+")
 
 
 def enforcement_mode() -> str:
@@ -82,10 +99,74 @@ def check_file_tool(payload: dict) -> tuple[int, str]:
     return ALLOW, ""
 
 
+def segment_is_read_only(segment: str) -> bool:
+    if (
+        ">" in segment
+        or "$(" in segment
+        or "`" in segment
+        or "--output" in segment
+        or "<(" in segment
+    ):
+        return False
+    words = segment.strip().split()
+    if not words:
+        return True
+    first = words[0]
+    if first == "git":
+        subcommand = next((word for word in words[1:] if not word.startswith("-")), "")
+        return subcommand in GIT_READ_SUBCOMMANDS
+    if first == "find":
+        return not any(word in FIND_MUTATING_FLAGS for word in words[1:])
+    return first in READ_ONLY_COMMANDS
+
+
+def command_is_read_only(command: str) -> bool:
+    return all(segment_is_read_only(segment) for segment in SEGMENT_SPLIT_PATTERN.split(command))
+
+
+def registry_lock_roots() -> list[tuple[str, dict]]:
+    registry_directory = state_directory() / "locks"
+    if not registry_directory.exists():
+        return []
+    roots: list[tuple[str, dict]] = []
+    for entry in registry_directory.glob("*.json"):
+        metadata = valid_metadata(read_json(entry))
+        if metadata is None:
+            continue
+        root = metadata.get("root", "")
+        if root and (Path(root) / MARKER_DIRECTORY_NAME).exists():
+            roots.append((root, metadata))
+    return roots
+
+
+def check_bash(payload: dict) -> tuple[int, str]:
+    command = payload.get("tool_input", {}).get("command", "")
+    session_id = payload.get("session_id", "")
+    cwd = payload.get("cwd") or "."
+    governed = governing_lock(cwd)
+    if (
+        governed is not None
+        and lock_is_foreign(governed["lock"], session_id)
+        and not command_is_read_only(command)
+    ):
+        return DENY, describe_lock(governed)
+    for root, metadata in registry_lock_roots():
+        if not lock_is_foreign(metadata, session_id):
+            continue
+        prefix = root.rstrip("\\/") + os.sep
+        for token in PATH_TOKEN_PATTERN.findall(command):
+            normalized = os.path.normcase(os.path.normpath(token))
+            if normalized == root or normalized.startswith(prefix):
+                return DENY, describe_lock({"root": root, "lock": metadata})
+    return ALLOW, ""
+
+
 def evaluate(payload: dict) -> tuple[int, str]:
     tool_name = payload.get("tool_name", "")
     if tool_name in FILE_TOOL_PATH_KEYS:
         return check_file_tool(payload)
+    if tool_name == "Bash":
+        return check_bash(payload)
     return ALLOW, ""
 
 
