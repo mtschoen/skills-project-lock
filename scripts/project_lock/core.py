@@ -112,6 +112,31 @@ def governing_lock(path: Path | str) -> dict[str, Any] | None:
         current = parent
 
 
+def related_locks(root: Path | str) -> dict[str, list[dict[str, Any]]]:
+    base = canonical_path(Path(root).expanduser())
+    ancestors: list[dict[str, Any]] = []
+    current = base.parent
+    while current != current.parent:
+        metadata = valid_metadata(read_json(current / MARKER_DIRECTORY_NAME / METADATA_FILE_NAME))
+        if metadata is not None:
+            ancestors.append({"root": str(current), "lock": metadata})
+        current = current.parent
+    descendants: list[dict[str, Any]] = []
+    prefix = str(base).rstrip("\\/") + os.sep
+    registry_directory = state_directory() / "locks"
+    if registry_directory.exists():
+        for entry in sorted(registry_directory.glob("*.json")):
+            metadata = valid_metadata(read_json(entry))
+            if metadata is None:
+                continue
+            lock_root = metadata.get("root", "")
+            if not lock_root.startswith(prefix):
+                continue
+            if (Path(lock_root) / MARKER_DIRECTORY_NAME).exists():
+                descendants.append({"root": lock_root, "lock": metadata})
+    return {"ancestors": ancestors, "descendants": descendants}
+
+
 def current_branch(root: Path) -> str | None:
     return run_git(root, "branch", "--show-current") or None
 
@@ -324,10 +349,14 @@ def inspect(
     root = resolve_root(path)
     marker = marker_directory(root)
     if not marker.exists():
-        return {"locked": False, "root": str(root)}
+        status: dict[str, Any] = {"locked": False, "root": str(root)}
+        related = related_locks(root)
+        if related["ancestors"] or related["descendants"]:
+            status["related"] = related
+        return status
     metadata = valid_metadata(read_json(metadata_path(root)))
     if metadata is None:
-        return {
+        damaged_status: dict[str, Any] = {
             "locked": True,
             "root": str(root),
             "overdue": False,
@@ -339,14 +368,22 @@ def inspect(
                 "expected_until": "unknown",
             },
         }
+        related = related_locks(root)
+        if related["ancestors"] or related["descendants"]:
+            damaged_status["related"] = related
+        return damaged_status
     now = utc_now()
-    return {
+    status = {
         "locked": True,
         "root": str(root),
         "overdue": now > parse_time(metadata["expected_until"]),
         "recommendation": recommendation(metadata, now=now, wait_threshold=wait_threshold),
         "lock": metadata,
     }
+    related = related_locks(root)
+    if related["ancestors"] or related["descendants"]:
+        status["related"] = related
+    return status
 
 
 def verify_owner(metadata: dict[str, Any], lock_id: str | None, force: bool) -> None:

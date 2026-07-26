@@ -143,6 +143,58 @@ def test_parser_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli.main() == 0
 
 
+def test_check_prints_related_nested_lock(nested_worktree_repo, capsys):
+    nested = nested_worktree_repo["nested"]
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+    check_arguments = argparse.Namespace(
+        path=nested_worktree_repo["main"], wait_threshold=timedelta(minutes=5), json=False
+    )
+    exit_code = cli.command_check(check_arguments)
+    output = capsys.readouterr().out
+    assert "related: nested" in output
+    assert exit_code == 0
+
+
+def test_check_prints_related_ancestor_and_descendant_when_locked(nested_worktree_repo, capsys):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(main, reason="parent", duration=timedelta(minutes=5))
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+
+    check_main = argparse.Namespace(path=main, wait_threshold=timedelta(minutes=5), json=False)
+    assert cli.command_check(check_main) == cli.EXIT_LOCKED
+    main_output = capsys.readouterr().out
+    assert "related: nested" in main_output
+
+    check_nested = argparse.Namespace(path=nested, wait_threshold=timedelta(minutes=5), json=False)
+    assert cli.command_check(check_nested) == cli.EXIT_LOCKED
+    nested_output = capsys.readouterr().out
+    assert "related: ancestor" in nested_output
+
+
+def test_check_prints_related_ancestor_when_free(nested_worktree_repo, capsys):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(main, reason="parent", duration=timedelta(minutes=5))
+    check_nested = argparse.Namespace(path=nested, wait_threshold=timedelta(minutes=5), json=False)
+    exit_code = cli.command_check(check_nested)
+    output = capsys.readouterr().out
+    assert "related: ancestor" in output
+    assert exit_code == 0
+
+
+def test_check_prints_related_for_damaged_metadata(nested_worktree_repo, capsys):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+    (main / core.MARKER_DIRECTORY_NAME).mkdir()
+    check_arguments = argparse.Namespace(path=main, wait_threshold=timedelta(minutes=5), json=False)
+    exit_code = cli.command_check(check_arguments)
+    output = capsys.readouterr().out
+    assert "related: nested" in output
+    assert exit_code == cli.EXIT_LOCKED
+
+
 def test_watch_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
     system_calls: list[str] = []
     monkeypatch.setattr(cli.os, "system", system_calls.append)

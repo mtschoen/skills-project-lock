@@ -325,3 +325,55 @@ def test_deepest_existing_directory_stops_at_filesystem_root(tmp_path, monkeypat
 def test_governing_lock_climbs_to_root_without_marker_or_git(tmp_path, monkeypatch):
     monkeypatch.setattr(core.Path, "exists", lambda self: str(self) == str(tmp_path / "plain3"))
     assert core.governing_lock(tmp_path / "plain3" / "x.py") is None
+
+
+def test_related_locks_reports_descendant_and_ancestor(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+    related = core.related_locks(main)
+    assert [entry["lock"]["reason"] for entry in related["descendants"]] == ["child"]
+    related_from_nested = core.related_locks(nested)
+    assert related_from_nested["descendants"] == []
+    core.acquire(main, reason="parent", duration=timedelta(minutes=5))
+    related_from_nested = core.related_locks(nested)
+    assert [e["lock"]["reason"] for e in related_from_nested["ancestors"]] == ["parent"]
+
+
+def test_inspect_includes_related(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+    status = core.inspect(main)
+    assert status["related"]["descendants"][0]["root"] == str(core.canonical_path(nested))
+
+
+def test_related_locks_skips_invalid_and_stale_registry_entries(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    registry_directory = core.state_directory() / "locks"
+    registry_directory.mkdir(parents=True)
+    corrupt = registry_directory / "corrupt.json"
+    corrupt.write_text("not-json")
+    stale_metadata = core.build_metadata(
+        core.canonical_path(nested),
+        reason="stale",
+        duration=timedelta(minutes=5),
+        strategy="auto",
+        owner="ghost",
+        session=None,
+    )
+    stale = registry_directory / "stale.json"
+    stale.write_text(json.dumps(stale_metadata))
+    related = core.related_locks(main)
+    assert related["descendants"] == []
+
+
+def test_inspect_damaged_metadata_includes_related(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+    (main / core.MARKER_DIRECTORY_NAME).mkdir()
+    status = core.inspect(main)
+    assert status["lock"]["owner"] == "unknown"
+    assert status["related"]["descendants"][0]["lock"]["reason"] == "child"

@@ -45,9 +45,18 @@ def print_json(payload: object) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def print_related(status: dict) -> None:
+    related = status.get("related") or {}
+    for entry in related.get("ancestors", []):
+        print(f"  related: ancestor {entry['root']} held by {entry['lock']['owner']}")
+    for entry in related.get("descendants", []):
+        print(f"  related: nested {entry['root']} held by {entry['lock']['owner']}")
+
+
 def print_status(status: dict) -> None:
     if not status["locked"]:
         print(f"FREE  {status['root']}")
+        print_related(status)
         return
     metadata = status["lock"]
     overdue = " OVERDUE" if status["overdue"] else ""
@@ -58,6 +67,7 @@ def print_status(status: dict) -> None:
     print(f"  expected: {metadata['expected_until']}")
     print(f"  lock id:  {metadata['lock_id']}")
     print(f"  advice:   {status['recommendation']}")
+    print_related(status)
 
 
 def command_acquire(arguments: argparse.Namespace) -> int:

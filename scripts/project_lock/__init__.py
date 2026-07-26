@@ -8,6 +8,7 @@ from .core import (
     inspect,
     list_locks,
     nearest_worktree_root,
+    related_locks,
     release,
     renew,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "inspect",
     "list_locks",
     "nearest_worktree_root",
+    "related_locks",
     "release",
     "renew",
 ]
