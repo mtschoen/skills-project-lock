@@ -1,5 +1,7 @@
 """Atomic, inspectable project-lock protocol."""
 
+# aislop-ignore-file complexity/file-too-large -- cohesive protocol core; split tracked separately
+
 from __future__ import annotations
 
 import hashlib

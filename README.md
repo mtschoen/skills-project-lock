@@ -61,8 +61,8 @@ This is bounded coverage, not a sandbox: relative or quoted paths that reach a f
 
 ```bash
 python -m pytest -q
-ruff check scripts tests
-ruff format --check scripts tests
+ruff check scripts tests hooks
+ruff format --check scripts tests hooks
 ```
 
 The runtime uses only the Python standard library.

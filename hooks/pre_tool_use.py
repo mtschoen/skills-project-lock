@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
+# aislop-ignore-next-line ai-slop/hallucinated-import -- sys.path-resolved sibling; stdlib-only
 from project_lock.core import (
     MARKER_DIRECTORY_NAME,
     governing_lock,
@@ -86,7 +87,8 @@ def resolve_target(target: str, cwd: str | None) -> str:
 
 
 def check_file_tool(payload: dict) -> tuple[int, str]:
-    target = payload.get("tool_input", {}).get(FILE_TOOL_PATH_KEYS[payload["tool_name"]])
+    tool_input = payload.get("tool_input") or {}
+    target = tool_input.get(FILE_TOOL_PATH_KEYS[payload["tool_name"]])
     if not target:
         return ALLOW, ""
     target = resolve_target(target, payload.get("cwd"))
@@ -140,7 +142,8 @@ def registry_lock_roots() -> list[tuple[str, dict]]:
 
 
 def check_bash(payload: dict) -> tuple[int, str]:
-    command = payload.get("tool_input", {}).get("command", "")
+    tool_input = payload.get("tool_input") or {}
+    command = tool_input.get("command", "")
     session_id = payload.get("session_id", "")
     cwd = payload.get("cwd") or "."
     governed = governing_lock(cwd)

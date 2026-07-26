@@ -9,8 +9,8 @@ This repository ships the `project-lock` agent skill and its dependency-free Pyt
 ```bash
 python -m pytest -q
 python -m pytest tests/test_hook.py -q
-ruff check scripts tests
-ruff format --check scripts tests
+ruff check scripts tests hooks
+ruff format --check scripts tests hooks
 uvx --from skills-ref==0.1.1 agentskills validate ../project-lock
 python scripts/project-lock.py --help
 ```
