@@ -286,3 +286,49 @@ def test_bash_git_diff_output_flag_denies(nested_worktree_repo):
     core.acquire(main, reason="busy", duration=timedelta(minutes=5), session="session-b")
     result = run_hook(bash_payload("git diff --output=out.txt", main))
     assert result.returncode == 2
+
+
+def test_bash_tilde_path_token_under_foreign_lock_denies(nested_worktree_repo, tmp_path):
+    sibling = nested_worktree_repo["sibling"]
+    home = tmp_path / "home"
+    locked = home / "lockedname"
+    locked.mkdir(parents=True)
+    core.acquire(locked, reason="busy", duration=timedelta(minutes=5), session="session-b")
+    result = run_hook(
+        bash_payload('echo x > "~/lockedname/out.txt"', sibling),
+        {"HOME": str(home), "USERPROFILE": str(home)},
+    )
+    assert result.returncode == 2
+
+
+def test_bash_home_var_path_token_under_foreign_lock_denies(nested_worktree_repo, tmp_path):
+    sibling = nested_worktree_repo["sibling"]
+    home = tmp_path / "home"
+    locked = home / "lockedname"
+    locked.mkdir(parents=True)
+    core.acquire(locked, reason="busy", duration=timedelta(minutes=5), session="session-b")
+    result = run_hook(
+        bash_payload('echo x > "$HOME/lockedname/out.txt"', sibling),
+        {"HOME": str(home), "USERPROFILE": str(home)},
+    )
+    assert result.returncode == 2
+
+
+def test_bash_read_only_command_referencing_foreign_absolute_path_allows(
+    nested_worktree_repo,
+):
+    main = nested_worktree_repo["main"]
+    sibling = nested_worktree_repo["sibling"]
+    core.acquire(main, reason="busy", duration=timedelta(minutes=5), session="session-b")
+    result = run_hook(bash_payload(f'cat "{main / "README.md"}"', sibling))
+    assert result.returncode == 0
+
+
+def test_bash_read_only_git_log_referencing_foreign_absolute_path_allows(
+    nested_worktree_repo,
+):
+    main = nested_worktree_repo["main"]
+    sibling = nested_worktree_repo["sibling"]
+    core.acquire(main, reason="busy", duration=timedelta(minutes=5), session="session-b")
+    result = run_hook(bash_payload(f'git log "{main}"', sibling))
+    assert result.returncode == 0

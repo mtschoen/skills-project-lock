@@ -20,9 +20,11 @@ Reads and non-mutating inspection do not require a lock.
 
 ## Enforcement
 
-Installations may wire `hooks/pre_tool_use.py` as a Claude Code `PreToolUse` hook (matcher `Edit|Write|NotebookEdit|Bash`). It denies file edits governed by another session's lock and denies unlocked edits with the exact acquire command to run (including `--session` when the payload carries a session id). Bash commands are split into segments on `;`, `&`, `|`, and newlines, and each segment is classified independently. Bash calls are denied only when the session's cwd sits in a foreign jurisdiction and the command is not read-only, or when the command references an absolute path under a registered foreign lock. Modes: `PROJECT_LOCK_ENFORCE=deny` (default), `warn`, `off`. The hook fails open on its own errors.
+Installations may wire `hooks/pre_tool_use.py` as a Claude Code `PreToolUse` hook (matcher `Edit|Write|NotebookEdit|Bash`). It denies file edits governed by another session's lock and denies unlocked edits with the exact acquire command to run (including `--session` when the payload carries a session id). Bash commands are split into segments on `;`, `&`, `|`, and newlines, and each segment is classified independently. Bash calls are denied only when the session's cwd sits in a foreign jurisdiction and the command is not read-only, or when a non-read-only command references an absolute path (including `~`- or `$VAR`-prefixed forms, expanded before comparison) under a registered foreign lock. Modes: `PROJECT_LOCK_ENFORCE=deny` (default), `warn`, `off`. The hook fails open on its own errors.
 
-Enforcement does not cover Bash writes that reach a foreign jurisdiction from outside via relative or quoted paths. Think before you Bash: hold the locks of every jurisdiction your command spans, especially for recursive operations (`rm -rf`, `git clean`, formatter sweeps, `git add -A`).
+Enforcement does not cover Bash writes that reach a foreign jurisdiction from outside via relative or quoted paths. Absolute paths containing spaces also escape the token scan, since a quoted space is indistinguishable from a token boundary. Think before you Bash: hold the locks of every jurisdiction your command spans, especially for recursive operations (`rm -rf`, `git clean`, formatter sweeps, `git add -A`).
+
+Unlocked Bash is allowed by design: acquiring a lock itself requires running a command, so the unlocked-write deny only applies to file tools (`Edit`/`Write`/`NotebookEdit`). Bash enforcement engages only against foreign jurisdictions, never against the absence of a lock.
 
 ## Acquire
 

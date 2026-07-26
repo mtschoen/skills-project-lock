@@ -39,7 +39,12 @@ FIND_MUTATING_FLAGS = frozenset(
     {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 )
 SEGMENT_SPLIT_PATTERN = re.compile(r"[;&|\n\r]+")
-PATH_TOKEN_PATTERN = re.compile(r"[A-Za-z]:[\\/][^\s'\"]+|/[^\s'\"]+")
+PATH_TOKEN_PATTERN = re.compile(
+    r"[A-Za-z]:[\\/][^\s'\"]+"
+    r"|~[\\/][^\s'\"]+"
+    r"|\$[A-Za-z_][A-Za-z0-9_]*[\\/][^\s'\"]+"
+    r"|/[^\s'\"]+"
+)
 
 
 def enforcement_mode() -> str:
@@ -153,14 +158,16 @@ def check_bash(payload: dict) -> tuple[int, str]:
         and not command_is_read_only(command)
     ):
         return DENY, describe_lock(governed)
-    for root, metadata in registry_lock_roots():
-        if not lock_is_foreign(metadata, session_id):
-            continue
-        prefix = root.rstrip("\\/") + os.sep
-        for token in PATH_TOKEN_PATTERN.findall(command):
-            normalized = os.path.normcase(os.path.normpath(token))
-            if normalized == root or normalized.startswith(prefix):
-                return DENY, describe_lock({"root": root, "lock": metadata})
+    if not command_is_read_only(command):
+        for root, metadata in registry_lock_roots():
+            if not lock_is_foreign(metadata, session_id):
+                continue
+            prefix = root.rstrip("\\/") + os.sep
+            for token in PATH_TOKEN_PATTERN.findall(command):
+                expanded = os.path.expandvars(os.path.expanduser(token))
+                normalized = os.path.normcase(os.path.normpath(expanded))
+                if normalized == root or normalized.startswith(prefix):
+                    return DENY, describe_lock({"root": root, "lock": metadata})
     return ALLOW, ""
 
 

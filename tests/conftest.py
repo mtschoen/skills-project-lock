@@ -18,10 +18,11 @@ def isolated_state_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 def run_git_command(*arguments: str, cwd: Path) -> None:
     subprocess.run(
-        ["git", *arguments],
+        ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=", *arguments],
         cwd=cwd,
         check=True,
         capture_output=True,
+        timeout=30,
         env={
             **os.environ,
             "GIT_AUTHOR_NAME": "test",

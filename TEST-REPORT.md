@@ -1,10 +1,12 @@
-skills-project-lock test report - 2026-07-26T12:54:15Z
+skills-project-lock test report - 2026-07-26T13:30:22Z
 =====================================================
 
 Status:   PASS
-Mode:     hook-enforcement gate refresh (Task 7 of the hook-enforcement plan)
-Tests:    63 total
-Git:      branch feat/hook-enforcement, HEAD 81cfe13 plus this task's changes
+Mode:     final-review fix pass (post-review findings on top of Task 7's gate
+          refresh); see "Final-review fix pass" section below
+Tests:    67 total (4 new: tilde-path, $VAR-path, read-only-skips-token-scan
+          x2)
+Git:      branch feat/hook-enforcement, HEAD 16d5579 plus this pass's changes
 Coverage: 467/467 statements (100%); 122/122 branches (100%)
           0 lines uncovered
           0 exclusion annotations
@@ -39,7 +41,7 @@ resolves under home; this is a machine artifact of this workstation, not a
 project or CI defect (CI runs on ubuntu-latest with no such artifact). The
 custom basetemp directory was deleted after the run.
 
-pytest: 63 passed, 100% line and branch coverage on `scripts/project_lock`
+pytest: 67 passed, 100% line and branch coverage on `scripts/project_lock`
 (`__init__.py` 2/2, `cli.py` 159/159 + 24/24 branches, `core.py` 306/306 +
 98/98 branches).
 
@@ -186,3 +188,53 @@ findings only in:
 
 Zero findings in any shipped file. This is expected transient branch state,
 not a defect to fix here.
+
+Final-review fix pass
+----------------------
+
+Applied whole-branch review findings on top of the Task 7 gate refresh above
+(commit on top of 16d5579):
+
+1. Closed the `~`/`$HOME` false-allow in the Bash path-token scan
+   (`hooks/pre_tool_use.py`): `PATH_TOKEN_PATTERN` gained a `~`-prefixed arm
+   and a `$VAR`-prefixed arm (previously the regex only anchored a match at
+   an embedded `/`, dropping the `~` or `$HOME` prefix entirely and letting
+   `echo x > ~/locked-repo/f.txt` slip through unmatched against the lock
+   root). Each matched token is now expanded (`os.path.expandvars` then
+   `os.path.expanduser`) before `normcase`/`normpath` comparison.
+2. Gated the registry token-scan loop in `check_bash` behind
+   `not command_is_read_only(command)`, matching the cwd-jurisdiction branch
+   immediately above it. Read-only commands (`cat`, `git log`, and friends)
+   that merely reference a path under a foreign lock are no longer denied;
+   redirection (`>`) or other mutation still is.
+3. Added 4 tests to `tests/test_hook.py`: tilde-path denial, `$HOME`-path
+   denial, read-only `cat` on a foreign absolute path (allow), and read-only
+   `git log` on a foreign absolute path (allow). Existing token-scan deny
+   tests (`echo x > "<path>"`) all involve redirection, so they remain
+   non-read-only and stay green under the new gate.
+4. Hardened `tests/conftest.py`'s `run_git_command`: added
+   `-c commit.gpgsign=false -c core.hooksPath=` (isolates the fixture from
+   host git config that could hang or misbehave, e.g. a gpgsign host) and
+   `timeout=30` to the `subprocess.run` call.
+5. Documented the deliberate unlocked-Bash-allowed asymmetry and the
+   quoted-path-with-spaces gap in both `SKILL.md` and `README.md`, plus a
+   README-only rollout recommendation (`PROJECT_LOCK_ENFORCE=warn` for the
+   first day of a global install).
+
+Commands run for this pass (all from the repo root):
+
+```bash
+python -m pytest -q --basetemp=C:/Users/Public/pytest-pl-tmp
+ruff check scripts tests hooks
+ruff format --check scripts tests hooks
+aislop ci .
+npx --yes markdownlint-cli2 "SKILL.md" "README.md"
+```
+
+Outcomes: pytest 67 passed, 100% line and branch coverage (unchanged
+statement/branch totals: `scripts/project_lock` 467/467 + 122/122); ruff
+check and format both clean; `aislop ci .` 100/100 (same 2 pre-existing
+suppressed findings as the Task 7 baseline, 0 new); markdownlint-cli2 clean
+on `SKILL.md`/`README.md` (repo-wide run still shows only the same
+pre-existing scratch/plan findings noted above, untouched by this pass). The
+`--basetemp` directory was deleted after the run.
