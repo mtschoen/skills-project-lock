@@ -263,3 +263,65 @@ def test_ignore_and_missing_renew_paths(repository: Path, monkeypatch: pytest.Mo
     core.ensure_git_ignore(repository)
     with pytest.raises(core.LockOwnershipError, match="not locked"):
         core.renew(repository, lock_id="none", duration=timedelta(seconds=1))
+
+
+def test_governing_lock_finds_ancestor_within_worktree(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="r", duration=timedelta(minutes=5))
+    governed = core.governing_lock(main / "src" / "new_file.py")
+    assert governed is not None
+    assert governed["root"] == str(core.canonical_path(main))
+    assert governed["lock"]["reason"] == "r"
+
+
+def test_governing_lock_stops_at_nested_worktree_boundary(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(main, reason="r", duration=timedelta(minutes=5))
+    assert core.governing_lock(nested / "inner.py") is None
+
+
+def test_governing_lock_sees_nested_lock_not_parent(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    core.acquire(main, reason="parent", duration=timedelta(minutes=5))
+    core.acquire(nested, reason="child", duration=timedelta(minutes=5))
+    governed = core.governing_lock(nested / "inner.py")
+    assert governed["lock"]["reason"] == "child"
+
+
+def test_governing_lock_damaged_marker_reports_none_lock(tmp_path):
+    project = tmp_path / "plain"
+    project.mkdir()
+    (project / ".agent-lock").mkdir()
+    governed = core.governing_lock(project / "file.txt")
+    assert governed == {"root": str(core.canonical_path(project)), "lock": None}
+
+
+def test_governing_lock_no_marker_returns_none(nested_worktree_repo):
+    assert core.governing_lock(nested_worktree_repo["sibling"] / "x.py") is None
+
+
+def test_nearest_worktree_root(nested_worktree_repo, tmp_path):
+    nested = nested_worktree_repo["nested"]
+    assert core.nearest_worktree_root(nested / "deep" / "x.py") == core.canonical_path(nested)
+    plain = tmp_path / "plain2"
+    plain.mkdir()
+    assert core.nearest_worktree_root(plain / "x.py") == core.canonical_path(plain)
+
+
+def test_deepest_existing_directory_resolves_existing_file(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    assert core.deepest_existing_directory(main / "README.md") == core.canonical_path(main)
+
+
+def test_deepest_existing_directory_stops_at_filesystem_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.Path, "exists", lambda self: False)
+    root = Path(tmp_path.anchor)
+    result = core.deepest_existing_directory(root / "definitely" / "not" / "real" / "path")
+    assert result == core.canonical_path(root)
+
+
+def test_governing_lock_climbs_to_root_without_marker_or_git(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.Path, "exists", lambda self: str(self) == str(tmp_path / "plain3"))
+    assert core.governing_lock(tmp_path / "plain3" / "x.py") is None

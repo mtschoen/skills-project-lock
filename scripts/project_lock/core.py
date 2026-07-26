@@ -73,6 +73,45 @@ def resolve_root(path: Path | str) -> Path:
     return canonical_path(Path(git_root) if git_root else candidate)
 
 
+def deepest_existing_directory(path: Path | str) -> Path:
+    candidate = Path(path).expanduser()
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+    if candidate.is_file():
+        candidate = candidate.parent
+    return canonical_path(candidate)
+
+
+def nearest_worktree_root(path: Path | str) -> Path:
+    start = deepest_existing_directory(path)
+    current = start
+    while True:
+        if (current / ".git").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return start
+        current = parent
+
+
+def governing_lock(path: Path | str) -> dict[str, Any] | None:
+    current = deepest_existing_directory(path)
+    while True:
+        marker = current / MARKER_DIRECTORY_NAME
+        if marker.exists():
+            metadata = valid_metadata(read_json(marker / METADATA_FILE_NAME))
+            return {"root": str(current), "lock": metadata}
+        if (current / ".git").exists():
+            return None
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
 def current_branch(root: Path) -> str | None:
     return run_git(root, "branch", "--show-current") or None
 
