@@ -18,6 +18,12 @@ Before the first write, mutating command, branch operation, dependency install, 
 
 Reads and non-mutating inspection do not require a lock.
 
+## Enforcement
+
+Installations may wire `hooks/pre_tool_use.py` as a Claude Code `PreToolUse` hook (matcher `Edit|Write|NotebookEdit|Bash`). It denies file edits governed by another session's lock and denies unlocked edits with the exact acquire command to run (including `--session` when the payload carries a session id). Bash commands are split into segments on `;`, `&`, `|`, and newlines, and each segment is classified independently. Bash calls are denied only when the session's cwd sits in a foreign jurisdiction and the command is not read-only, or when the command references an absolute path under a registered foreign lock. Modes: `PROJECT_LOCK_ENFORCE=deny` (default), `warn`, `off`. The hook fails open on its own errors.
+
+Enforcement does not cover Bash writes that reach a foreign jurisdiction from outside via relative or quoted paths. Think before you Bash: hold the locks of every jurisdiction your command spans, especially for recursive operations (`rm -rf`, `git clean`, formatter sweeps, `git add -A`).
+
 ## Acquire
 
 Give other agents enough context to decide whether to wait or use a worktree:
@@ -81,6 +87,8 @@ python <script> release <path> --force
 Never force-clear merely because `expected_until` passed.
 
 ## Protocol and limitations
+
+Jurisdiction is the nearest enclosing Git worktree: a lock governs everything under its root except nested worktrees (their `.git` boundary stops it), and an ancestor checkout's lock never reaches inside a worktree checked out as a subfolder. `check` reports related ancestor and nested locks so subtree-wide operations can be cleared manually first.
 
 Acquisition atomically creates `<root>/.agent-lock/`; metadata lives in `owner.json`. Git repositories receive a local `.git/info/exclude` entry so the marker does not dirty status. A per-user SQLite transaction serializes acquire, renew, and release so a stale owner cannot overwrite a replacement lock. The same per-user state directory contains the registry used by `list` and `watch`.
 
