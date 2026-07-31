@@ -35,7 +35,7 @@ npx --yes markdownlint-cli2
 ```
 
 `--basetemp` was pointed outside the default pytest tmp root (which lives
-under `C:\Users\mtsch`) because a stray `.git` directory at the user's home
+under the user's home directory) because a stray `.git` directory at the user's home
 breaks `test_core.py::test_nearest_worktree_root` when pytest's tmp factory
 resolves under home; this is a machine artifact of this workstation, not a
 project or CI defect (CI runs on ubuntu-latest with no such artifact). The
