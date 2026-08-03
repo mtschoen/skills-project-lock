@@ -238,3 +238,61 @@ suppressed findings as the Task 7 baseline, 0 new); markdownlint-cli2 clean
 on `SKILL.md`/`README.md` (repo-wide run still shows only the same
 pre-existing scratch/plan findings noted above, untouched by this pass). The
 `--basetemp` directory was deleted after the run.
+
+Review-response pass: scratch carve-out redesign
+--------------------------------------------------
+
+Addressed PR #2 review feedback on top of 85bdd22 ("Allow the hook to
+enforce only inside real project roots"). The owner's objection: that
+commit's `has_git_ancestor()` carve-out allowed *every* unlocked write
+outside a Git checkout, silently exempting non-Git project directories
+(e.g. `~/Documents/notes`) from coordination -- not just true scratch space.
+
+Redesign:
+
+1. `scripts/project_lock/core.py`: added `_temp_roots()` (canonicalized,
+   de-duplicated list of `tempfile.gettempdir()`, `$TMPDIR`, `/tmp`,
+   `/private/tmp`, `/var/folders`, skipping candidates that don't exist on
+   this machine) and `is_under_temp_dir()` (true if the target's deepest
+   existing ancestor resolves under one of those roots).
+2. `hooks/pre_tool_use.py`: the unlocked-write carve-out in `check_file_tool`
+   now requires **both** `not has_git_ancestor(target)` **and**
+   `is_under_temp_dir(target)` to allow. Enforcement of an *existing* lock
+   (the `governing_lock(target) is not None` branch) was never touched by
+   85bdd22 or this pass -- a registered `.agent-lock/` marker governs its
+   jurisdiction whether or not that jurisdiction is a Git checkout.
+3. Net effect: Git repos anywhere (including fixtures under `/tmp`) stay
+   enforced (`has_git_ancestor()` catches them first); non-Git project
+   directories stay enforced (deny-with-acquire-recipe, since they are not
+   under a recognized temp root); only true scratch under a temp root with
+   no Git ancestor is exempt.
+4. Tests: renamed the 2 existing scratch-allow tests in `tests/test_hook.py`
+   to `..._under_temp_...` for accuracy, added
+   `test_non_git_path_outside_temp_denies_with_acquire_recipe` (monkeypatches
+   `core._temp_roots` to `list` to simulate a non-Git target outside any
+   recognized temp root, since `tmp_path` physically lives under the real
+   system temp dir and can't be relocated for a subprocess-based test).
+   Added 6 tests to `tests/test_core.py` covering `_temp_roots()` (env-var
+   inclusion + de-dup against `gettempdir()`, skipping unset/missing
+   candidates) and `is_under_temp_dir()` (target-is-root, root-is-ancestor,
+   root-present-but-unrelated, no-recognized-root). Net +7 tests (71 -> 78).
+5. `SKILL.md` and `README.md`: reworded the enforcement paragraphs so
+   existing-lock enforcement is described as applying everywhere (Git or
+   not), and only the unlocked-write carve-out is described as scoped to
+   temp-rooted scratch (Copilot review comments on SKILL.md:25 and
+   README.md:56).
+
+Commands run for this pass (from the repo root):
+
+```bash
+python -m pytest -q
+uvx ruff check scripts tests hooks
+uvx ruff format --check scripts tests hooks
+agentskills validate <symlink named project-lock>
+```
+
+Outcomes: pytest 78 passed (7 new), 100% line and branch coverage
+(`scripts/project_lock` 496/496 statements, 134/134 branches); `ruff check`
+and `ruff format --check` both clean; `agentskills validate` (via a
+same-named symlink, since the working tree for this pass was a temp
+worktree) reports valid.

@@ -88,19 +88,35 @@ def test_no_lock_denies_with_acquire_recipe(nested_worktree_repo):
     assert "--session session-a" in result.stderr
 
 
-def test_scratch_path_with_no_git_ancestor_allows_edit(tmp_path):
+def test_scratch_path_with_no_git_ancestor_under_temp_allows_edit(tmp_path):
+    # tmp_path is itself under the system temp dir, so a non-Git target below
+    # it is true scratch space: no project root to coordinate.
     target = tmp_path / "scratch" / "notes.txt"
     result = run_hook(edit_payload(target))
     assert result.returncode == 0
     assert result.stderr == ""
 
 
-def test_scratch_path_with_no_git_ancestor_allows_edit_in_process(tmp_path):
+def test_scratch_path_with_no_git_ancestor_under_temp_allows_edit_in_process(tmp_path):
     hook_module = load_hook_module()
     target = tmp_path / "scratch" / "notes.txt"
     decision, message = hook_module.check_file_tool(edit_payload(target))
     assert decision == hook_module.ALLOW
     assert message == ""
+
+
+def test_non_git_path_outside_temp_denies_with_acquire_recipe(tmp_path, monkeypatch):
+    # Simulate a non-Git project directory that is NOT scratch (e.g.
+    # ~/Documents/notes) by making is_under_temp_dir() see no recognized temp
+    # roots, even though tmp_path physically lives under one. The owner's
+    # review point: agents must still coordinate writes here, so this must be
+    # denied with an acquire recipe, not silently allowed.
+    monkeypatch.setattr(core, "_temp_roots", list)
+    hook_module = load_hook_module()
+    target = tmp_path / "notes" / "file.txt"
+    decision, message = hook_module.check_file_tool(edit_payload(target))
+    assert decision == hook_module.DENY
+    assert "acquire" in message
 
 
 def test_nested_worktree_not_governed_by_parent_lock(nested_worktree_repo):

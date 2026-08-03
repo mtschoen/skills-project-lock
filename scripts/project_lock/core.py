@@ -116,6 +116,51 @@ def has_git_ancestor(path: Path | str) -> bool:
         current = parent
 
 
+def _temp_roots() -> list[Path]:
+    """Recognized system scratch roots, canonicalized and de-duplicated.
+
+    Covers `tempfile.gettempdir()`, `$TMPDIR`, and the common Unix/macOS temp
+    mounts. Candidates that don't exist on this machine (e.g. `/var/folders`
+    off macOS) are skipped. Resolving each candidate means a symlinked mount
+    (macOS `/tmp` -> `/private/tmp`) matches paths that reach it through
+    either name.
+    """
+    candidates = [
+        tempfile.gettempdir(),
+        os.environ.get("TMPDIR"),
+        "/tmp",
+        "/private/tmp",
+        "/var/folders",
+    ]
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        resolved = canonical_path(path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        roots.append(resolved)
+    return roots
+
+
+def is_under_temp_dir(path: Path | str) -> bool:
+    """True if `path` (or its deepest existing ancestor) resolves under a
+    recognized system temp location.
+
+    Paired with `has_git_ancestor()` to scope the hook's unlocked-write
+    carve-out to true scratch space: a Git checkout that happens to live
+    under a temp mount (e.g. a test fixture under `/tmp`) is still enforced,
+    because `has_git_ancestor()` catches that case first.
+    """
+    target = deepest_existing_directory(path)
+    return any(target == root or root in target.parents for root in _temp_roots())
+
+
 def governing_lock(path: Path | str) -> dict[str, Any] | None:
     current = deepest_existing_directory(path)
     while True:

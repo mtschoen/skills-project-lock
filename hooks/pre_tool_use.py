@@ -23,6 +23,7 @@ from project_lock.core import (
     MARKER_DIRECTORY_NAME,
     governing_lock,
     has_git_ancestor,
+    is_under_temp_dir,
     nearest_worktree_root,
     read_json,
     state_directory,
@@ -101,12 +102,16 @@ def check_file_tool(payload: dict) -> tuple[int, str]:
     session_id = payload.get("session_id", "")
     governed = governing_lock(target)
     if governed is None:
-        # No lock is registered anywhere above this path. That's either a real,
-        # unlocked project (deny, demand acquire) or scratch space with no
-        # project root at all -- e.g. files under $TMPDIR, /tmp, or a scratch
-        # directory that was never a Git checkout. Scratch space has nothing
-        # to coordinate, so it is always allowed.
-        if not has_git_ancestor(target):
+        # No lock is registered anywhere above this path. Allow only true
+        # scratch space: no Git checkout anywhere above the target AND the
+        # target sits under a recognized system temp location ($TMPDIR,
+        # /tmp, /private/tmp, /var/folders, tempfile.gettempdir()). Both
+        # conditions matter -- a Git checkout under a temp mount (e.g. a
+        # test fixture under /tmp) is still a real, coordinable project and
+        # stays enforced; a non-Git project directory elsewhere (e.g.
+        # ~/Documents/notes) also stays enforced, since agents still need to
+        # coordinate writes there even without Git.
+        if not has_git_ancestor(target) and is_under_temp_dir(target):
             return ALLOW, ""
         return DENY, acquire_recipe(target, session_id)
     if lock_is_foreign(governed["lock"], session_id):

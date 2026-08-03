@@ -337,6 +337,47 @@ def test_has_git_ancestor_false_without_git(tmp_path, monkeypatch):
     assert core.has_git_ancestor(tmp_path / "plain4" / "x.py") is False
 
 
+def test_temp_roots_includes_tmpdir_env_and_dedupes_gettempdir(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    roots = core._temp_roots()
+    assert roots.count(core.canonical_path(tmp_path)) == 1
+
+
+def test_temp_roots_skips_unset_env_and_missing_candidates(tmp_path, monkeypatch):
+    missing = tmp_path / "does-not-exist"
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(missing))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    roots = core._temp_roots()
+    assert core.canonical_path(missing) not in roots
+
+
+def test_is_under_temp_dir_true_when_target_is_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(tmp_path)])
+    assert core.is_under_temp_dir(tmp_path) is True
+
+
+def test_is_under_temp_dir_true_when_root_is_ancestor(tmp_path, monkeypatch):
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(tmp_path)])
+    assert core.is_under_temp_dir(child / "file.txt") is True
+
+
+def test_is_under_temp_dir_false_when_root_present_but_unrelated(tmp_path, monkeypatch):
+    other_root = tmp_path / "other-root"
+    other_root.mkdir()
+    unrelated = tmp_path / "elsewhere"
+    unrelated.mkdir()
+    monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(other_root)])
+    assert core.is_under_temp_dir(unrelated / "file.txt") is False
+
+
+def test_is_under_temp_dir_false_without_recognized_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_temp_roots", list)
+    assert core.is_under_temp_dir(tmp_path / "x") is False
+
+
 def test_related_locks_reports_descendant_and_ancestor(nested_worktree_repo):
     main = nested_worktree_repo["main"]
     nested = nested_worktree_repo["nested"]
