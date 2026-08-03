@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from project_lock.core import (
     MARKER_DIRECTORY_NAME,
     governing_lock,
+    has_git_ancestor,
     nearest_worktree_root,
     read_json,
     state_directory,
@@ -100,6 +101,13 @@ def check_file_tool(payload: dict) -> tuple[int, str]:
     session_id = payload.get("session_id", "")
     governed = governing_lock(target)
     if governed is None:
+        # No lock is registered anywhere above this path. That's either a real,
+        # unlocked project (deny, demand acquire) or scratch space with no
+        # project root at all -- e.g. files under $TMPDIR, /tmp, or a scratch
+        # directory that was never a Git checkout. Scratch space has nothing
+        # to coordinate, so it is always allowed.
+        if not has_git_ancestor(target):
+            return ALLOW, ""
         return DENY, acquire_recipe(target, session_id)
     if lock_is_foreign(governed["lock"], session_id):
         return DENY, describe_lock(governed)

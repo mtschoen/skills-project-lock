@@ -99,6 +99,23 @@ def nearest_worktree_root(path: Path | str) -> Path:
         current = parent
 
 
+def has_git_ancestor(path: Path | str) -> bool:
+    """True if `path` (or an existing ancestor) sits inside a Git working tree.
+
+    Used by the pre-write hook to tell a real, unlocked project apart from
+    scratch space that never had a project root to begin with.
+    """
+    start = deepest_existing_directory(path)
+    current = start
+    while True:
+        if (current / ".git").exists():
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
+
+
 def governing_lock(path: Path | str) -> dict[str, Any] | None:
     current = deepest_existing_directory(path)
     while True:

@@ -88,6 +88,21 @@ def test_no_lock_denies_with_acquire_recipe(nested_worktree_repo):
     assert "--session session-a" in result.stderr
 
 
+def test_scratch_path_with_no_git_ancestor_allows_edit(tmp_path):
+    target = tmp_path / "scratch" / "notes.txt"
+    result = run_hook(edit_payload(target))
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_scratch_path_with_no_git_ancestor_allows_edit_in_process(tmp_path):
+    hook_module = load_hook_module()
+    target = tmp_path / "scratch" / "notes.txt"
+    decision, message = hook_module.check_file_tool(edit_payload(target))
+    assert decision == hook_module.ALLOW
+    assert message == ""
+
+
 def test_nested_worktree_not_governed_by_parent_lock(nested_worktree_repo):
     main = nested_worktree_repo["main"]
     nested = nested_worktree_repo["nested"]

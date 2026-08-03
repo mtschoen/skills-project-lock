@@ -327,6 +327,16 @@ def test_governing_lock_climbs_to_root_without_marker_or_git(tmp_path, monkeypat
     assert core.governing_lock(tmp_path / "plain3" / "x.py") is None
 
 
+def test_has_git_ancestor_true_inside_repo(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    assert core.has_git_ancestor(main / "deep" / "file.py") is True
+
+
+def test_has_git_ancestor_false_without_git(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.Path, "exists", lambda self: str(self) == str(tmp_path / "plain4"))
+    assert core.has_git_ancestor(tmp_path / "plain4" / "x.py") is False
+
+
 def test_related_locks_reports_descendant_and_ancestor(nested_worktree_repo):
     main = nested_worktree_repo["main"]
     nested = nested_worktree_repo["nested"]
