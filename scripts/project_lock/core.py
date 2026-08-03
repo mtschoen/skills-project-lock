@@ -119,19 +119,25 @@ def has_git_ancestor(path: Path | str) -> bool:
 def _temp_roots() -> list[Path]:
     """Recognized system scratch roots, canonicalized and de-duplicated.
 
-    Covers `tempfile.gettempdir()`, `$TMPDIR`, and the common Unix/macOS temp
-    mounts. Candidates that don't exist on this machine (e.g. `/var/folders`
-    off macOS) are skipped. Resolving each candidate means a symlinked mount
-    (macOS `/tmp` -> `/private/tmp`) matches paths that reach it through
-    either name.
+    Covers `tempfile.gettempdir()`, `$TMPDIR`, and, off Windows, the common
+    Unix/macOS temp mounts. Candidates that don't exist on this machine
+    (e.g. `/var/folders` off macOS) are skipped. Resolving each candidate
+    means a symlinked mount (macOS `/tmp` -> `/private/tmp`) matches paths
+    that reach it through either name.
+
+    The POSIX literals are gated on `os.name != "nt"`: on Windows they are
+    drive-relative, not absolute, so `/tmp` resolves against the current
+    working directory's drive (e.g. `C:\\tmp`) rather than denoting "no
+    recognized temp location". Probing them there would enroll whatever
+    happens to exist at `<cwd drive>:\\tmp` as a scratch root, and the
+    result would depend on the caller's current drive.
     """
     candidates = [
         tempfile.gettempdir(),
         os.environ.get("TMPDIR"),
-        "/tmp",
-        "/private/tmp",
-        "/var/folders",
     ]
+    if os.name != "nt":
+        candidates += ["/tmp", "/private/tmp", "/var/folders"]
     roots: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:

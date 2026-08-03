@@ -352,6 +352,26 @@ def test_temp_roots_skips_unset_env_and_missing_candidates(tmp_path, monkeypatch
     assert core.canonical_path(missing) not in roots
 
 
+def test_temp_roots_skips_posix_literals_on_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.os, "name", "nt")
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    posix_literals = [Path("/tmp"), Path("/private/tmp"), Path("/var/folders")]
+    probed: list[Path] = []
+    original_exists = Path.exists
+
+    def tracking_exists(self):
+        if self in posix_literals:
+            probed.append(self)
+            return True
+        return original_exists(self)
+
+    monkeypatch.setattr(core.Path, "exists", tracking_exists)
+    roots = core._temp_roots()
+    assert probed == []
+    assert all(root not in posix_literals for root in roots)
+
+
 def test_is_under_temp_dir_true_when_target_is_root(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(tmp_path)])
     assert core.is_under_temp_dir(tmp_path) is True
