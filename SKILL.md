@@ -22,6 +22,10 @@ Reads and non-mutating inspection do not require a lock.
 
 Installations may wire `hooks/pre_tool_use.py` as a Claude Code `PreToolUse` hook (matcher `Edit|Write|NotebookEdit|Bash`). It denies file edits governed by another session's lock and denies unlocked edits with the exact acquire command to run (including `--session` when the payload carries a session id). Bash commands are split into segments on `;`, `&`, `|`, and newlines, and each segment is classified independently. Bash calls are denied only when the session's cwd sits in a foreign jurisdiction and the command is not read-only, or when a non-read-only command references an absolute path (including `~`- or `$VAR`-prefixed forms, expanded before comparison) under a registered foreign lock. Modes: `PROJECT_LOCK_ENFORCE=deny` (default), `warn`, `off`. The hook fails open on its own errors.
 
+Enforcement of an existing lock applies everywhere: any `.agent-lock/` marker governs its jurisdiction whether or not that jurisdiction is a Git checkout. The only carve-out is for *unlocked* writes with nothing registered anywhere above the target. Those are denied with an acquire recipe by default, including in non-Git project directories, since agents still need to coordinate writes there, *except* when the target is true scratch: no `.git` anywhere above it (checked with `has_git_ancestor()`) **and** it sits under a recognized system temp location (`$TMPDIR` or `tempfile.gettempdir()` everywhere; also `/tmp`, `/private/tmp`, and `/var/folders` off Windows, checked with `is_under_temp_dir()`). Both conditions must hold: a Git checkout that happens to live under a temp mount (e.g. a test fixture under `/tmp`) still has its own `.git` and stays enforced normally.
+
+Known limitations of the scratch carve-out: a stray `.git` directory above a temp root (e.g. an accidentally created empty `~/.git`) makes `has_git_ancestor()` true for the whole temp tree beneath it, disabling the carve-out there. A symlink inside a real repo that resolves into a temp root is treated as scratch, since path resolution happens before the temp-root comparison. This is cooperative coordination, not a security boundary.
+
 Enforcement does not cover Bash writes that reach a foreign jurisdiction from outside via relative or quoted paths. Absolute paths containing spaces also escape the token scan, since a quoted space is indistinguishable from a token boundary. Think before you Bash: hold the locks of every jurisdiction your command spans, especially for recursive operations (`rm -rf`, `git clean`, formatter sweeps, `git add -A`).
 
 Unlocked Bash is allowed by design: acquiring a lock itself requires running a command, so the unlocked-write deny only applies to file tools (`Edit`/`Write`/`NotebookEdit`). Bash enforcement engages only against foreign jurisdictions, never against the absence of a lock.
@@ -95,3 +99,12 @@ Jurisdiction is the nearest enclosing Git worktree: a lock governs everything un
 Acquisition atomically creates `<root>/.agent-lock/`; metadata lives in `owner.json`. Git repositories receive a local `.git/info/exclude` entry so the marker does not dirty status. A per-user SQLite transaction serializes acquire, renew, and release so a stale owner cannot overwrite a replacement lock. The same per-user state directory contains the registry used by `list` and `watch`.
 
 This is cooperative coordination, not a security boundary. Filesystems such as NFS, SMB, and cloud-sync folders may weaken atomicity. Use a transactional coordinator with fencing for cross-host deployments or irreversible external operations.
+
+`acquire`, `renew`, and `release` all serialize through one global SQLite file in the per-user state directory (`mutation_guard`), regardless of which project each call targets. This is a same-user global critical section: two lock mutations for two *different* projects on the same machine still take turns through that one file. In practice each mutation holds it only briefly, so this is not a throughput concern, but it means lock mutations across all of a user's projects are never truly concurrent.
+
+## Works with
+
+- **fleet-orchestration** treats this skill as its pre-flight check: before dispatching agents across repos, it runs `project-lock.py check <repo>` and follows the reported advice, falling back to ad hoc git heuristics only when this skill isn't installed.
+- **unity-batchmode-worktree** acquires this lock on the agent's paired worktree before writing, alongside its own `.claude-reserved` pool-slot marker (that marker tracks pool membership; this lock coordinates the writes).
+
+Both are consumers layered on top of this skill, not alternative locking mechanisms: this skill is the canonical write-coordination primitive.

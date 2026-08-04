@@ -327,6 +327,77 @@ def test_governing_lock_climbs_to_root_without_marker_or_git(tmp_path, monkeypat
     assert core.governing_lock(tmp_path / "plain3" / "x.py") is None
 
 
+def test_has_git_ancestor_true_inside_repo(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    assert core.has_git_ancestor(main / "deep" / "file.py") is True
+
+
+def test_has_git_ancestor_false_without_git(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.Path, "exists", lambda self: str(self) == str(tmp_path / "plain4"))
+    assert core.has_git_ancestor(tmp_path / "plain4" / "x.py") is False
+
+
+def test_temp_roots_includes_tmpdir_env_and_dedupes_gettempdir(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    roots = core._temp_roots()
+    assert roots.count(core.canonical_path(tmp_path)) == 1
+
+
+def test_temp_roots_skips_unset_env_and_missing_candidates(tmp_path, monkeypatch):
+    missing = tmp_path / "does-not-exist"
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(missing))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    roots = core._temp_roots()
+    assert core.canonical_path(missing) not in roots
+
+
+def test_temp_roots_skips_posix_literals_on_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.os, "name", "nt")
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    posix_literals = [Path("/tmp"), Path("/private/tmp"), Path("/var/folders")]
+    probed: list[Path] = []
+    original_exists = Path.exists
+
+    def tracking_exists(self):
+        if self in posix_literals:
+            probed.append(self)
+            return True
+        return original_exists(self)
+
+    monkeypatch.setattr(core.Path, "exists", tracking_exists)
+    roots = core._temp_roots()
+    assert probed == []
+    assert all(root not in posix_literals for root in roots)
+
+
+def test_is_under_temp_dir_true_when_target_is_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(tmp_path)])
+    assert core.is_under_temp_dir(tmp_path) is True
+
+
+def test_is_under_temp_dir_true_when_root_is_ancestor(tmp_path, monkeypatch):
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(tmp_path)])
+    assert core.is_under_temp_dir(child / "file.txt") is True
+
+
+def test_is_under_temp_dir_false_when_root_present_but_unrelated(tmp_path, monkeypatch):
+    other_root = tmp_path / "other-root"
+    other_root.mkdir()
+    unrelated = tmp_path / "elsewhere"
+    unrelated.mkdir()
+    monkeypatch.setattr(core, "_temp_roots", lambda: [core.canonical_path(other_root)])
+    assert core.is_under_temp_dir(unrelated / "file.txt") is False
+
+
+def test_is_under_temp_dir_false_without_recognized_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_temp_roots", list)
+    assert core.is_under_temp_dir(tmp_path / "x") is False
+
+
 def test_related_locks_reports_descendant_and_ancestor(nested_worktree_repo):
     main = nested_worktree_repo["main"]
     nested = nested_worktree_repo["nested"]
