@@ -296,3 +296,65 @@ Outcomes: pytest 78 passed (7 new), 100% line and branch coverage
 and `ruff format --check` both clean; `agentskills validate` (via a
 same-named symlink, since the working tree for this pass was a temp
 worktree) reports valid.
+
+Follow-up pass: Windows temp-root gating and doc fixes
+--------------------------------------------------------
+
+Took over PR #2 to address a second round of review feedback on top of
+045e6a1's predecessor 7b1b10b ("Scope the scratch carve-out to temp dirs,
+not all non-Git paths"). Finding: `_temp_roots()` probed the POSIX literals
+`/tmp`, `/private/tmp`, and `/var/folders` unconditionally. On Windows those
+paths are drive-relative, not absolute, so `/tmp` resolves against the
+current working directory's drive (e.g. `C:\tmp`) instead of denoting "no
+recognized temp location"; a stray `C:\tmp` on the caller's drive would
+silently enroll as a scratch root, and the result would depend on the
+caller's cwd.
+
+Fix: gated the three POSIX literals on `os.name != "nt"` in
+`scripts/project_lock/core.py::_temp_roots()`; `tempfile.gettempdir()` and
+`$TMPDIR` remain unconditional. Added
+`test_temp_roots_skips_posix_literals_on_windows` to `tests/test_core.py`,
+which monkeypatches `core.os.name` to `"nt"` and asserts the POSIX literals
+are never probed (via a tracking `Path.exists` wrapper) and never appear in
+the result, so it passes on both Windows and Linux regardless of which
+platform actually runs it. Also updated `README.md` and `SKILL.md` to state
+that only `tempfile.gettempdir()`/`$TMPDIR` apply on Windows, added a
+"known limitations" note (a stray `.git` above a temp root disables the
+carve-out for everything beneath it; a symlink into a temp root reads as
+scratch since resolution happens before comparison), and removed em-dashes
+from this PR's added prose.
+
+Testing was done by pushing to the PR branch and running the suite over SSH
+on a Linux host (`llamabox`) rather than on the Windows working machine, per
+this repo's environment guidance. A fresh clone of the branch there hit two
+environment artifacts unrelated to this change: an empty stray `.git`
+directory at both `/tmp/.git` and `/home/schoen/.git` on that host, each of
+which makes `has_git_ancestor()` true for everything beneath it and masks
+the scratch carve-out for any path under the default temp/home trees.
+Removing them was denied by a permission classifier, so the suite was run
+instead with `TMPDIR` and `--basetemp` pointed at `/var/tmp/pl-pr2-basetemp`
+(confirmed to have no `.git` in its ancestry), which sidesteps the
+contamination without touching shared machine state. The stray directories
+themselves are flagged separately for the user/owner to clear; this PR does
+not special-case them in code, per the same "cooperative coordination, not
+a security boundary" scoping already documented for the carve-out.
+
+Commands run for this pass:
+
+```bash
+python -m py_compile scripts/project_lock/core.py tests/test_core.py hooks/pre_tool_use.py
+ruff check scripts tests hooks
+ruff format --check scripts tests hooks
+markdownlint-cli2 SKILL.md README.md
+# on llamabox, against a fresh clone of the pushed branch:
+TMPDIR=/var/tmp/pl-pr2-basetemp python -m pytest tests -q \
+  --basetemp=/var/tmp/pl-pr2-basetemp \
+  --cov=scripts/project_lock --cov-report=term-missing
+```
+
+Outcomes: pytest 79 passed (1 new), 100% line and branch coverage
+(`scripts/project_lock` 337/337 statements, 112/112 branches, repo total
+498/498 statements); `ruff check` and `ruff format --check` both clean;
+`markdownlint-cli2` reports 0 issues on `SKILL.md`/`README.md`.
+`agentskills validate` was not run in this pass (tool unavailable in both
+environments used); the skill directory structure was not touched.
