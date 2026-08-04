@@ -105,6 +105,6 @@ This is cooperative coordination, not a security boundary. Filesystems such as N
 ## Works with
 
 - **fleet-orchestration** treats this skill as its pre-flight check: before dispatching agents across repos, it runs `project-lock.py check <repo>` and follows the reported advice, falling back to ad hoc git heuristics only when this skill isn't installed.
-- **unity-batchmode-worktree** acquires this lock on the agent's paired worktree before writing, alongside its own `.claude-reserved` pool-slot marker (that marker tracks pool membership; this lock coordinates the writes).
+- **unity-batchmode-worktree** acquires this lock on the agent's paired worktree before writing, alongside its own `.worktree-reserved` pool-slot marker (that marker tracks pool membership; this lock coordinates the writes).
 
 Both are consumers layered on top of this skill, not alternative locking mechanisms: this skill is the canonical write-coordination primitive.
