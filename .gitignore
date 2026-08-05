@@ -7,6 +7,7 @@ htmlcov/
 .pi-subagents/
 workspace/
 
-# aislop runtime artifacts (session log, caches) - keep only the config.
-.aislop/*
-!.aislop/config.yml
+# aislop runtime artifacts (session/history logs, caches, baselines).
+# Unanchored so nested project directories are covered too.
+**/.aislop/*
+!**/.aislop/config.yml
