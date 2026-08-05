@@ -63,17 +63,26 @@ def git_administration_roots(worktree_root: Path) -> list[Path]:
     every worktree of the repository. Either may be absent when Git is
     unavailable or the path is not a repository, in which case the caller
     treats the target as ordinary content.
+
+    Both are asked for in a single `rev-parse`, which costs the same as asking
+    for one and halves the subprocess count on this path. The two coincide for
+    a main worktree, so the result is de-duplicated.
     """
+    reported = run_git(worktree_root, "rev-parse", "--git-dir", "--git-common-dir")
+    if not reported:
+        return []
     roots: list[Path] = []
-    for argument in ("--git-dir", "--git-common-dir"):
-        reported = run_git(worktree_root, "rev-parse", argument)
-        if not reported:
+    for line in reported.splitlines():
+        candidate = Path(line.strip())
+        if not candidate.name:
             continue
-        candidate = Path(reported)
         if not candidate.is_absolute():
             candidate = worktree_root / candidate
-        if candidate.exists():
-            roots.append(canonical_path(candidate))
+        if not candidate.exists():
+            continue
+        resolved = canonical_path(candidate)
+        if resolved not in roots:
+            roots.append(resolved)
     return roots
 
 

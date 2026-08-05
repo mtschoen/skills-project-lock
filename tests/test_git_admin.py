@@ -76,12 +76,30 @@ def test_missing_git_output_yields_no_administration_roots(nested_worktree_repo,
 def test_relative_git_directory_resolves_against_the_worktree_root(
     nested_worktree_repo, monkeypatch
 ):
+    """A main worktree reports the same path twice; it is de-duplicated."""
     main = nested_worktree_repo["main"]
-    monkeypatch.setattr(git_admin, "run_git", lambda path, *arguments: ".git")
+    monkeypatch.setattr(git_admin, "run_git", lambda path, *arguments: ".git\n.git")
 
     roots = git_admin.git_administration_roots(main)
 
-    assert roots == [git_admin.canonical_path(main / ".git")] * 2
+    assert roots == [git_admin.canonical_path(main / ".git")]
+
+
+def test_blank_lines_in_rev_parse_output_are_skipped(nested_worktree_repo, monkeypatch):
+    main = nested_worktree_repo["main"]
+    monkeypatch.setattr(git_admin, "run_git", lambda path, *arguments: ".git\n\n")
+
+    assert git_admin.git_administration_roots(main) == [git_admin.canonical_path(main / ".git")]
+
+
+def test_linked_worktree_reports_both_private_and_common_directories(nested_worktree_repo):
+    sibling = nested_worktree_repo["sibling"]
+    main = nested_worktree_repo["main"]
+
+    roots = git_admin.git_administration_roots(sibling)
+
+    assert git_admin.canonical_path(main / ".git") in roots
+    assert git_admin.canonical_path(main / ".git" / "worktrees" / "sibling") in roots
 
 
 def test_reported_but_absent_git_directory_is_skipped(nested_worktree_repo, monkeypatch):
