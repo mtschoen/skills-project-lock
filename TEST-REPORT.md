@@ -1,10 +1,11 @@
-skills-project-lock test report - 2026-08-06T00:25:00Z
+skills-project-lock test report - 2026-08-06T01:10:00Z
 ========================================================
 
-Git:      main @ 7625090 (pre-commit working tree)
-Status:   PASS (Windows local and ubuntu-latest CI)
-Tests:    148 passed, 0 failed, 0 skipped
-Coverage: 662/663 statements, 191/192 branches (99.8%) on scripts/project_lock
+Git:      main @ a4760e8 (pre-commit working tree)
+Status:   PASS (Windows local, WSL Ubuntu-24.04, and ubuntu-latest CI)
+Tests:    149 passed, 0 failed, 0 skipped
+Coverage: 672/672 statements, 192/192 branches (100.0%) on scripts/project_lock,
+          on both Windows and Linux
 Lint:     ruff check: clean
           ruff format --check: clean
           markdownlint-cli2: 0 findings on tracked files
@@ -25,9 +26,17 @@ uvx --from skills-ref==0.1.1 agentskills validate
 Coverage note
 -------------
 
-The single uncovered line is `core.py:132`, the `os.name != "nt"` arm of
-`_temp_roots()` that adds the POSIX temp mounts. It is unreachable on Windows
-and covered on Linux, where CI (ubuntu-latest) enforces the 100% gate.
+Coverage is 100% on **both** platforms as of 2026-08-06. It previously sat at
+99.8% on Windows: the POSIX arm of `_temp_roots()` was gated directly on
+`os.name != "nt"` and so was unreachable here, leaving the 100% gate
+checkable only on Linux CI.
+
+The gate could not be closed by patching `os.name` in a test, because
+`pathlib` reads it to choose its flavour - forcing `"posix"` on Windows makes
+the next `Path.resolve()` die with `UnsupportedOperation: cannot instantiate
+'PosixPath' on your system`. The platform test now lives behind a named seam,
+`core._is_windows()`, which tests patch instead. Both arms are exercised on
+every host, so neither test depends on where the suite runs.
 
 An earlier revision of this report recorded three failures and a second
 uncovered line as permanent machine-local artifacts. They were caused by an
@@ -46,6 +55,17 @@ from the liveness commit onward while this report said PASS, because every
 local run had the attribute. Anything patched onto a platform-conditional
 standard-library name needs `raising=False`, and a report generated on one
 platform should be read against the CI run for the same commit.
+
+The cheap way to close that gap on a Windows host is WSL, which runs the real
+Linux suite against the same checkout over `/mnt/c`:
+
+```bash
+wsl.exe -d Ubuntu-24.04 -- bash -lc \
+  'cd /mnt/c/<path>/project-lock && ~/.venvs/pl/bin/python -m pytest -q'
+```
+
+It reproduced the five `ctypes` failures exactly, where faking the platform on
+Windows (a plugin that deletes the attribute) produced two spurious extras.
 
 Performance (chromium: 500,533 tracked files, 1.5 GB .git)
 ----------------------------------------------------------
@@ -87,6 +107,9 @@ Smoke (SMOKE.md, live installed skill)
   the pid openable and liveness keeps reporting `running`. That errs in the
   safe direction, since the pid also cannot be reused while the handle lives,
   so the lock is simply treated as still held.
+- Temp-root detection after the `_is_windows()` seam, on both hosts: Windows
+  reports only `%TEMP%` with no drive-relative `/tmp` enrolled; Linux reports
+  `/tmp` and excludes `/home`.
 - Git-admin ownership, all seven cases against real `git worktree` fixtures:
   idle repo allows `config`, `info/exclude` and `hooks/pre-commit`; holding the
   main checkout allows `config`; another session holding main denies; holding

@@ -358,8 +358,32 @@ def test_temp_roots_skips_unset_env_and_missing_candidates(tmp_path, monkeypatch
     assert core.canonical_path(missing) not in roots
 
 
+def test_temp_roots_probes_posix_literals_off_windows(tmp_path, monkeypatch):
+    # The mirror of the test below. Both run everywhere: the platform seam is
+    # patched, so neither branch depends on the host the suite runs on.
+    monkeypatch.setattr(core, "_is_windows", lambda: False)
+    monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    posix_literals = [Path("/tmp"), Path("/private/tmp"), Path("/var/folders")]
+    probed: list[Path] = []
+    original_exists = Path.exists
+
+    def tracking_exists(self):
+        if self in posix_literals:
+            probed.append(self)
+            # Report them absent so the result stays identical on every host,
+            # including Windows where "/tmp" resolves against the cwd drive.
+            return False
+        return original_exists(self)
+
+    monkeypatch.setattr(core.Path, "exists", tracking_exists)
+    roots = core._temp_roots()
+    assert probed == posix_literals
+    assert roots == [core.canonical_path(tmp_path)]
+
+
 def test_temp_roots_skips_posix_literals_on_windows(tmp_path, monkeypatch):
-    monkeypatch.setattr(core.os, "name", "nt")
+    monkeypatch.setattr(core, "_is_windows", lambda: True)
     monkeypatch.setattr(core.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.delenv("TMPDIR", raising=False)
     posix_literals = [Path("/tmp"), Path("/private/tmp"), Path("/var/folders")]

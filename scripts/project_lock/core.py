@@ -109,6 +109,16 @@ def has_git_ancestor(path: Path | str) -> bool:
         current = parent
 
 
+def _is_windows() -> bool:
+    """Platform test behind a named seam so tests can flip it.
+
+    Patching `os.name` directly would do it too, but `pathlib` reads that to
+    choose its flavour, so forcing it to `"posix"` on Windows makes `Path`
+    raise `UnsupportedOperation` on the next `resolve()`.
+    """
+    return os.name == "nt"
+
+
 def _temp_roots() -> list[Path]:
     """Recognized system scratch roots, canonicalized and de-duplicated.
 
@@ -118,7 +128,7 @@ def _temp_roots() -> list[Path]:
     means a symlinked mount (macOS `/tmp` -> `/private/tmp`) matches paths
     that reach it through either name.
 
-    The POSIX literals are gated on `os.name != "nt"`: on Windows they are
+    The POSIX literals are gated on `_is_windows()`: on Windows they are
     drive-relative, not absolute, so `/tmp` resolves against the current
     working directory's drive (e.g. `C:\\tmp`) rather than denoting "no
     recognized temp location". Probing them there would enroll whatever
@@ -129,7 +139,7 @@ def _temp_roots() -> list[Path]:
         tempfile.gettempdir(),
         os.environ.get("TMPDIR"),
     ]
-    if os.name != "nt":
+    if not _is_windows():
         candidates += ["/tmp", "/private/tmp", "/var/folders"]
     roots: list[Path] = []
     seen: set[Path] = set()
