@@ -2,7 +2,7 @@
 
 Cooperative project and Git-worktree locks for autonomous coding agents.
 
-The repository contains an Agent Skill plus a dependency-free Python CLI. Agents check and acquire a lock before writing outside or inside their starting directory. Lock metadata tells contenders who is working, why, when they expect to finish, and whether waiting or a separate worktree is preferred.
+The repository contains a skill plus a dependency-free Python CLI. Agents check and acquire a lock before writing outside or inside their starting directory. Lock metadata tells contenders who is working, why, when they expect to finish, and whether waiting or a separate worktree is preferred.
 
 ## Quick start
 
@@ -31,7 +31,9 @@ python scripts/project-lock.py release /path/to/project --force
 
 ## Enforcement hook
 
-`hooks/pre_tool_use.py` is a mechanical `PreToolUse` hook: wire it in the user's own `settings.json` (portable form, no machine paths):
+`hooks/pre_tool_use.py` is a mechanical `PreToolUse` hook. Wire it in the user-level agent settings.
+
+For example on Claude Code, use any `settings.json` (portable form, no machine paths):
 
 ```json
 {
