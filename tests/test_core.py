@@ -85,7 +85,12 @@ def test_conflict_and_ownership_errors(repository: Path) -> None:
         core.release(repository)
     with pytest.raises(core.LockOwnershipError, match="does not match"):
         core.release(repository, lock_id="wrong")
-    assert core.release(repository, force=True)
+    assert core.release(
+        repository,
+        force=True,
+        expect_lock_id=metadata["lock_id"],
+        reason="owner verified abandoned",
+    )
     assert metadata["lock_id"]
 
 
@@ -103,10 +108,12 @@ def test_corrupt_metadata_requires_force(repository: Path) -> None:
     unexpected = marker / "unexpected"
     unexpected.write_text("x")
     with pytest.raises(core.LockOwnershipError, match="unexpected"):
-        core.release(repository, force=True)
+        core.release(repository, force=True, reason="metadata is corrupt")
     assert metadata_file.exists()
     unexpected.unlink()
-    assert core.release(repository, force=True)
+    # Unreadable metadata carries no lock id to compare, so the reason is the
+    # whole gate; --expect-lock-id is only demanded for a readable lock.
+    assert core.release(repository, force=True, reason="metadata is corrupt")
 
 
 def test_non_git_root_and_file_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,7 +254,7 @@ def test_release_failure_preserves_metadata(
     core.marker_directory(repository).mkdir()
     monkeypatch.setattr(core.Path, "rmdir", fail_for_marker)
     with pytest.raises(core.LockOwnershipError, match="could not remove"):
-        core.release(repository, force=True)
+        core.release(repository, force=True, reason="owner verified abandoned")
 
 
 def test_ignore_and_missing_renew_paths(repository: Path, monkeypatch: pytest.MonkeyPatch) -> None:

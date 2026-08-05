@@ -30,6 +30,9 @@ from project_lock.core import (
     valid_metadata,
 )
 
+# aislop-ignore-next-line ai-slop/hallucinated-import -- sys.path-resolved sibling; stdlib-only
+from project_lock.git_admin import is_git_admin_path
+
 FILE_TOOL_PATH_KEYS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
 ALLOW = 0
 DENY = 2
@@ -86,6 +89,16 @@ def acquire_recipe(target: str, session_id: str) -> str:
     )
 
 
+def git_admin_refusal(target: str) -> str:
+    return (
+        f"project-lock: {target} is Git administration state\n"
+        "  A project lock covers worktree content. Refs, config and the worktree\n"
+        "  registry are shared by every worktree of the repository, so no single\n"
+        "  worktree's lock can authorize a direct write to them.\n"
+        "  Use a git command instead (git config, git branch, git worktree, ...)."
+    )
+
+
 def resolve_target(target: str, cwd: str | None) -> str:
     path = Path(target)
     if path.is_absolute():
@@ -100,6 +113,10 @@ def check_file_tool(payload: dict) -> tuple[int, str]:
         return ALLOW, ""
     target = resolve_target(target, payload.get("cwd"))
     session_id = payload.get("session_id", "")
+    # Refused ahead of the lock check, and regardless of who holds what: this
+    # state is shared by every worktree, so no worktree lock speaks for it.
+    if is_git_admin_path(target):
+        return DENY, git_admin_refusal(target)
     governed = governing_lock(target)
     if governed is None:
         # No lock is registered anywhere above this path. Allow only true

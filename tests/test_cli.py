@@ -59,7 +59,9 @@ def test_cli_lifecycle(
     assert cli.command_renew(renew_arguments) == cli.EXIT_LOCKED
     assert "does not match" in capsys.readouterr().err
 
-    release_arguments = argparse.Namespace(path=tmp_path, lock_id="wrong", force=False)
+    release_arguments = argparse.Namespace(
+        path=tmp_path, lock_id="wrong", force=False, expect_lock_id=None, reason=None
+    )
     assert cli.command_release(release_arguments) == cli.EXIT_LOCKED
     release_arguments.lock_id = lock_id
     assert cli.command_release(release_arguments) == 0

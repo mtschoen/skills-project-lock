@@ -66,6 +66,7 @@ def print_status(status: dict) -> None:
     print(f"  branch:   {metadata.get('branch') or '-'}")
     print(f"  expected: {metadata['expected_until']}")
     print(f"  lock id:  {metadata['lock_id']}")
+    print(f"  owner pid:{metadata.get('creator_pid', '-')} ({status.get('owner_process', '-')})")
     print(f"  advice:   {status['recommendation']}")
     print_related(status)
 
@@ -111,7 +112,13 @@ def command_renew(arguments: argparse.Namespace) -> int:
 
 def command_release(arguments: argparse.Namespace) -> int:
     try:
-        released = release(arguments.path, lock_id=arguments.lock_id, force=arguments.force)
+        released = release(
+            arguments.path,
+            lock_id=arguments.lock_id,
+            force=arguments.force,
+            expect_lock_id=arguments.expect_lock_id,
+            reason=arguments.reason,
+        )
     except LockOwnershipError as error:
         print(str(error), file=sys.stderr)
         return EXIT_LOCKED
@@ -146,7 +153,10 @@ def command_watch(arguments: argparse.Namespace) -> int:
             clear_screen()
             print("PROJECT LOCKS  (Ctrl-C to exit)\n")
             command_list(argparse.Namespace(json=False))
-            print("\nOverride: project-lock.py release PATH --force")
+            print(
+                "\nOverride: project-lock.py release PATH --force"
+                ' --expect-lock-id ID --reason "why"'
+            )
             time.sleep(arguments.interval)
     except KeyboardInterrupt:
         return 0
@@ -200,6 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
     release_parser.add_argument("path", type=Path)
     release_parser.add_argument("--lock-id")
     release_parser.add_argument("--force", action="store_true")
+    release_parser.add_argument(
+        "--expect-lock-id",
+        help="lock id verified as abandoned; required with --force on a readable lock",
+    )
+    release_parser.add_argument("--reason", help="audit reason; required with --force")
     release_parser.set_defaults(function=command_release)
 
     list_parser = subparsers.add_parser("list", help="list all registered locks")

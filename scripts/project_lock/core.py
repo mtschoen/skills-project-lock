@@ -14,9 +14,13 @@ import subprocess
 import tempfile
 import uuid
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from .audit import record_force_release
+from .common import format_time, parse_time, state_directory, utc_now
+from .process_identity import owner_liveness, process_start_identity
 
 PROTOCOL_VERSION = 1
 MARKER_DIRECTORY_NAME = ".agent-lock"
@@ -33,18 +37,6 @@ class LockConflict(RuntimeError):
 
 class LockOwnershipError(RuntimeError):
     """Raised when a caller cannot prove ownership of a lock."""
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-def format_time(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def canonical_path(path: Path) -> Path:
@@ -211,19 +203,6 @@ def current_branch(root: Path) -> str | None:
     return run_git(root, "branch", "--show-current") or None
 
 
-def state_directory() -> Path:
-    override = os.environ.get("PROJECT_LOCK_STATE_DIR")
-    if override:
-        return Path(override).expanduser()
-    if platform.system() == "Windows":
-        local_application_data = os.environ.get("LOCALAPPDATA")
-        if local_application_data:
-            return Path(local_application_data) / "project-lock"
-    xdg_state_home = os.environ.get("XDG_STATE_HOME")
-    base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
-    return base / "project-lock"
-
-
 def registry_path(root: Path) -> Path:
     digest = hashlib.sha256(str(root).encode("utf-8")).hexdigest()
     return state_directory() / "locks" / f"{digest}.json"
@@ -357,6 +336,7 @@ def build_metadata(
         "host": socket.gethostname(),
         "platform": platform.system(),
         "creator_pid": os.getpid(),
+        "creator_process_start": process_start_identity(os.getpid()),
         "created_at": format_time(now),
         "updated_at": format_time(now),
         "expected_until": format_time(now + duration),
@@ -448,6 +428,10 @@ def inspect(
         "root": str(root),
         "overdue": now > parse_time(metadata["expected_until"]),
         "recommendation": recommendation(metadata, now=now, wait_threshold=wait_threshold),
+        # Evidence for a human deciding whether to force-clear. Deliberately
+        # kept out of `recommendation`: a dead owner process is a strong hint,
+        # never an automatic verdict that the lock is free to take.
+        "owner_process": owner_liveness(metadata),
         "lock": metadata,
     }
     related = related_locks(root)
@@ -456,13 +440,40 @@ def inspect(
     return status
 
 
-def verify_owner(metadata: dict[str, Any], lock_id: str | None, force: bool) -> None:
-    if force:
-        return
+def verify_owner(metadata: dict[str, Any], lock_id: str | None) -> None:
+    """Prove ownership of a lock being released or renewed by its holder.
+
+    Force-clears do not pass through here; they are gated by `verify_override`.
+    """
     if not lock_id:
         raise LockOwnershipError("--lock-id is required unless --force is used")
     if metadata.get("lock_id") != lock_id:
         raise LockOwnershipError("lock id does not match the current owner")
+
+
+def verify_override(
+    metadata: dict[str, Any] | None, expect_lock_id: str | None, reason: str | None
+) -> None:
+    """Gate a force-clear on a stated reason and a compare-and-swap.
+
+    Verifying that a lock is abandoned and then clearing it are two steps, and
+    the lock can turn over in between. Requiring the caller to name the lock id
+    it verified makes the override fail rather than discard a replacement.
+    """
+    if not reason or not reason.strip():
+        raise LockOwnershipError("--reason is required to force-clear another agent's lock")
+    if metadata is None:
+        return
+    if not expect_lock_id:
+        raise LockOwnershipError(
+            "--expect-lock-id is required to force-clear a readable lock; "
+            f"the current holder is {metadata['lock_id']}"
+        )
+    if metadata["lock_id"] != expect_lock_id:
+        raise LockOwnershipError(
+            f"{expect_lock_id} no longer holds this project; "
+            f"the current holder is {metadata['lock_id']}"
+        )
 
 
 def renew(path: Path | str, *, lock_id: str, duration: timedelta) -> dict[str, Any]:
@@ -471,7 +482,7 @@ def renew(path: Path | str, *, lock_id: str, duration: timedelta) -> dict[str, A
         metadata = valid_metadata(read_json(metadata_path(root)))
         if metadata is None:
             raise LockOwnershipError("project is not locked or lock metadata is unavailable")
-        verify_owner(metadata, lock_id, False)
+        verify_owner(metadata, lock_id)
         now = utc_now()
         metadata["updated_at"] = format_time(now)
         metadata["expected_until"] = format_time(now + duration)
@@ -480,7 +491,14 @@ def renew(path: Path | str, *, lock_id: str, duration: timedelta) -> dict[str, A
         return metadata
 
 
-def release(path: Path | str, *, lock_id: str | None = None, force: bool = False) -> bool:
+def release(
+    path: Path | str,
+    *,
+    lock_id: str | None = None,
+    force: bool = False,
+    expect_lock_id: str | None = None,
+    reason: str | None = None,
+) -> bool:
     root = resolve_root(path)
     marker = marker_directory(root)
     with mutation_guard():
@@ -493,8 +511,15 @@ def release(path: Path | str, *, lock_id: str | None = None, force: bool = False
             raise LockOwnershipError(
                 "lock metadata is unavailable; use --force after verifying abandonment"
             )
-        if metadata is not None:
-            verify_owner(metadata, lock_id, force)
+        if force:
+            verify_override(metadata, expect_lock_id, reason)
+            # Recorded before the marker goes, so a force-clear can never
+            # succeed unaudited. `reason` is non-empty past verify_override.
+            record_force_release(str(root), metadata, reason or "")
+        else:
+            # Unreadable metadata without --force already raised above, so the
+            # lock is readable here.
+            verify_owner(metadata, lock_id)
         unexpected_entries = {entry.name for entry in marker.iterdir()} - {METADATA_FILE_NAME}
         if unexpected_entries:
             names = ", ".join(sorted(unexpected_entries))

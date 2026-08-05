@@ -363,3 +363,45 @@ def test_bash_read_only_git_log_referencing_foreign_absolute_path_allows(
     core.acquire(main, reason="busy", duration=timedelta(minutes=5), session="session-b")
     result = run_hook(bash_payload(f'git log "{main}"', sibling))
     assert result.returncode == 0
+
+
+def test_git_config_write_is_denied_even_to_the_lock_holder(nested_worktree_repo):
+    """Repository state is shared by every worktree, so no worktree lock owns it."""
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    result = run_hook(edit_payload(main / ".git" / "config", session_id="session-a"))
+    assert result.returncode == 2
+    assert "Git administration state" in result.stderr
+
+
+def test_private_worktree_metadata_write_is_denied(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    target = main / ".git" / "worktrees" / "sibling" / "HEAD"
+    result = run_hook(edit_payload(target, session_id="session-a"))
+    assert result.returncode == 2
+
+
+def test_linked_worktree_git_marker_write_is_denied(nested_worktree_repo):
+    sibling = nested_worktree_repo["sibling"]
+    core.acquire(sibling, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    result = run_hook(edit_payload(sibling / ".git", session_id="session-a"))
+    assert result.returncode == 2
+
+
+def test_worktree_content_write_still_allowed_to_the_lock_holder(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    result = run_hook(edit_payload(main / "README.md", session_id="session-a"))
+    assert result.returncode == 0
+
+
+def test_git_admin_denial_respects_warn_mode(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    result = run_hook(
+        edit_payload(main / ".git" / "config", session_id="session-a"),
+        {"PROJECT_LOCK_ENFORCE": "warn"},
+    )
+    assert result.returncode == 0
+    assert "Git administration state" in result.stderr

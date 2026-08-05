@@ -6,3 +6,7 @@ __pycache__/
 htmlcov/
 .pi-subagents/
 workspace/
+
+# aislop runtime artifacts (session log, caches) - keep only the config.
+.aislop/*
+!.aislop/config.yml

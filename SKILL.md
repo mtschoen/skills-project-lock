@@ -22,6 +22,8 @@ Reads and non-mutating inspection do not require a lock.
 
 Installations may wire `hooks/pre_tool_use.py` as `PreToolUse` hook (matcher `Edit|Write|NotebookEdit|Bash`). It denies file edits governed by another session's lock and denies unlocked edits with the exact acquire command to run (including `--session` when the payload carries a session id). Bash commands are split into segments on `;`, `&`, `|`, and newlines, and each segment is classified independently. Bash calls are denied only when the session's cwd sits in a foreign jurisdiction and the command is not read-only, or when a non-read-only command references an absolute path (including `~`- or `$VAR`-prefixed forms, expanded before comparison) under a registered foreign lock. Modes: `PROJECT_LOCK_ENFORCE=deny` (default), `warn`, `off`. The hook fails open on its own errors.
 
+Direct file-tool writes to **Git administration state** are denied outright, regardless of which lock you hold. A lock's jurisdiction is worktree *content*; refs, config, and the worktree registry are shared by every worktree of the repository, so no single worktree's lock can authorize a write to them. This covers the common and private Git directories (`--git-dir`, `--git-common-dir`) and the `.git` marker at a worktree root, whose file form repoints the whole worktree. Express those changes as Git commands (`git config`, `git branch`, `git worktree`) instead. Bash is deliberately excluded from this rule: Git itself writes to `.git` constantly, and a word-level classifier cannot separate that from a raw clobber. The check runs only when a path component ends in `.git`, so ordinary content edits pay no subprocess cost.
+
 Enforcement of an existing lock applies everywhere: any `.agent-lock/` marker governs its jurisdiction whether or not that jurisdiction is a Git checkout. The only carve-out is for *unlocked* writes with nothing registered anywhere above the target. Those are denied with an acquire recipe by default, including in non-Git project directories, since agents still need to coordinate writes there, *except* when the target is true scratch: no `.git` anywhere above it (checked with `has_git_ancestor()`) **and** it sits under a recognized system temp location (`$TMPDIR` or `tempfile.gettempdir()` everywhere; also `/tmp`, `/private/tmp`, and `/var/folders` off Windows, checked with `is_under_temp_dir()`). Both conditions must hold: a Git checkout that happens to live under a temp mount (e.g. a test fixture under `/tmp`) still has its own `.git` and stays enforced normally.
 
 Known limitations of the scratch carve-out: a stray `.git` directory above a temp root (e.g. an accidentally created empty `~/.git`) makes `has_git_ancestor()` true for the whole temp tree beneath it, disabling the carve-out there. A symlink inside a real repo that resolves into a temp root is treated as scratch, since path resolution happens before the temp-root comparison. This is cooperative coordination, not a security boundary.
@@ -87,18 +89,42 @@ python <script> watch
 After independently verifying a lock is abandoned, the user or supervising agent may clear it:
 
 ```bash
-python <script> release <path> --force
+python <script> release <path> --force \
+  --expect-lock-id <the id you verified> \
+  --reason "owner session exited; verified pid gone"
 ```
 
-Never force-clear merely because `expected_until` passed.
+Both flags are required. `--reason` is recorded; `--expect-lock-id` is a compare-and-swap. Verifying that a lock is abandoned and then clearing it are two steps, and the lock can turn over in between: naming the id you verified makes the override fail rather than silently discard a replacement. A lock whose `owner.json` is unreadable has no id to compare, so there `--reason` alone is the gate.
+
+Every force-clear is appended to `audit.jsonl` in the per-user state directory before the lock is removed, so an override cannot succeed unaudited. A trail that cannot be written fails the override and leaves the lock standing.
+
+`check` reports `owner pid: <pid> (<state>)`, where state is one of:
+
+- **gone** - no such process, or the pid belongs to a different process than the one that acquired the lock. Strong evidence of abandonment, and the evidence a force-clear wants.
+- **running** - the acquiring process is still alive, confirmed against its recorded start identity.
+- **running-unverified** - something holds that pid, but its identity could not be confirmed. Treat as running.
+- **unknown** - the lock was taken on another host, or this platform cannot answer. Start identity is read on Linux and Windows only.
+
+Never force-clear merely because `expected_until` passed. A dead owner process is evidence for your judgement, never an automatic verdict: `recommendation` deliberately ignores it.
 
 ## Protocol and limitations
 
-Jurisdiction is the nearest enclosing Git worktree: a lock governs everything under its root except nested worktrees (their `.git` boundary stops it), and an ancestor checkout's lock never reaches inside a worktree checked out as a subfolder. `check` reports related ancestor and nested locks so subtree-wide operations can be cleared manually first.
+Jurisdiction is the nearest enclosing Git worktree, and covers that worktree's *content* only. Repository-wide state (refs, config, the worktree registry) is shared by every worktree and belongs to no single lock; see Enforcement above. A lock governs everything under its root except nested worktrees (their `.git` boundary stops it), and an ancestor checkout's lock never reaches inside a worktree checked out as a subfolder. `check` reports related ancestor and nested locks so subtree-wide operations can be cleared manually first.
 
 Acquisition atomically creates `<root>/.agent-lock/`; metadata lives in `owner.json`. Git repositories receive a local `.git/info/exclude` entry so the marker does not dirty status. A per-user SQLite transaction serializes acquire, renew, and release so a stale owner cannot overwrite a replacement lock. The same per-user state directory contains the registry used by `list` and `watch`.
 
 This is cooperative coordination, not a security boundary. Filesystems such as NFS, SMB, and cloud-sync folders may weaken atomicity. Use a transactional coordinator with fencing for cross-host deployments or irreversible external operations.
+
+A `PreToolUse` hook governs the writes a harness represents in tool input, and nothing else. It cannot govern:
+
+- arbitrary shell redirection, or paths a command computes at runtime;
+- writes by Python, Node, build tools, test runners, package managers, formatters, or editors;
+- subprocesses and background jobs;
+- file descriptors opened before the decision, or writable memory mappings;
+- link and rename races between the allow decision and the write;
+- another terminal, IDE, human, or agent outside the interceptor.
+
+An allow decision is therefore a point-in-time cooperative snapshot, not protection against a racing writer. Do not read it as stronger than that.
 
 `acquire`, `renew`, and `release` all serialize through one global SQLite file in the per-user state directory (`mutation_guard`), regardless of which project each call targets. This is a same-user global critical section: two lock mutations for two *different* projects on the same machine still take turns through that one file. In practice each mutation holds it only briefly, so this is not a throughput concern, but it means lock mutations across all of a user's projects are never truly concurrent.
 
