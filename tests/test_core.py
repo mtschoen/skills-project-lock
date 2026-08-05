@@ -181,6 +181,7 @@ def test_valid_metadata_rejects_invalid_shapes(repository: Path) -> None:
         strategy="auto",
         owner="owner",
         session=None,
+        owner_pid=None,
     )
     assert core.valid_metadata(metadata) is metadata
     assert core.valid_metadata(None) is None
@@ -440,6 +441,7 @@ def test_related_locks_skips_invalid_and_stale_registry_entries(nested_worktree_
         strategy="auto",
         owner="ghost",
         session=None,
+        owner_pid=None,
     )
     stale = registry_directory / "stale.json"
     stale.write_text(json.dumps(stale_metadata))

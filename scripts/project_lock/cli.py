@@ -66,7 +66,7 @@ def print_status(status: dict) -> None:
     print(f"  branch:   {metadata.get('branch') or '-'}")
     print(f"  expected: {metadata['expected_until']}")
     print(f"  lock id:  {metadata['lock_id']}")
-    print(f"  owner pid:{metadata.get('creator_pid', '-')} ({status.get('owner_process', '-')})")
+    print(f"  owner pid: {metadata.get('owner_pid') or '-'} ({status.get('owner_process', '-')})")
     print(f"  advice:   {status['recommendation']}")
     print_related(status)
 
@@ -80,6 +80,7 @@ def command_acquire(arguments: argparse.Namespace) -> int:
             strategy=arguments.strategy,
             owner=arguments.owner,
             session=arguments.session,
+            owner_pid=arguments.owner_pid,
         )
     except LockConflict as error:
         print(str(error), file=sys.stderr)
@@ -190,6 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
     acquire_parser.add_argument("--strategy", choices=("auto", "wait", "worktree"), default="auto")
     acquire_parser.add_argument("--owner")
     acquire_parser.add_argument("--session")
+    acquire_parser.add_argument(
+        "--owner-pid",
+        type=int,
+        help=(
+            "pid of a durable process whose death means this lock is abandoned "
+            "(e.g. the agent session). Omit unless it outlives this command: "
+            "this command's own pid dies immediately and would read as abandoned."
+        ),
+    )
     acquire_parser.add_argument("--json", action="store_true")
     acquire_parser.set_defaults(function=command_acquire)
 

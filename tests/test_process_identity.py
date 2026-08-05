@@ -38,7 +38,7 @@ def test_start_identity_is_none_for_unassignable_pid() -> None:
 
 
 def test_owner_liveness_reports_unknown_for_a_different_host() -> None:
-    metadata = {"host": "some-other-host", "creator_pid": os.getpid()}
+    metadata = {"host": "some-other-host", "owner_pid": os.getpid()}
 
     assert process_identity.owner_liveness(metadata) == "unknown"
 
@@ -50,7 +50,7 @@ def test_owner_liveness_reports_unknown_without_pid() -> None:
 
 
 def test_owner_liveness_reports_unknown_for_a_malformed_pid() -> None:
-    metadata = {"host": socket.gethostname(), "creator_pid": "not-a-pid"}
+    metadata = {"host": socket.gethostname(), "owner_pid": "not-a-pid"}
 
     assert process_identity.owner_liveness(metadata) == "unknown"
 
@@ -59,8 +59,8 @@ def test_owner_liveness_verifies_matching_start_identity(monkeypatch) -> None:
     monkeypatch.setattr(process_identity, "probe_process", lambda pid: ("running", "start-abc"))
     metadata = {
         "host": socket.gethostname(),
-        "creator_pid": 4321,
-        "creator_process_start": "start-abc",
+        "owner_pid": 4321,
+        "owner_process_start": "start-abc",
     }
 
     assert process_identity.owner_liveness(metadata) == "running"
@@ -71,8 +71,8 @@ def test_owner_liveness_treats_reused_pid_as_gone(monkeypatch) -> None:
     monkeypatch.setattr(process_identity, "probe_process", lambda pid: ("running", "start-new"))
     metadata = {
         "host": socket.gethostname(),
-        "creator_pid": 4321,
-        "creator_process_start": "start-old",
+        "owner_pid": 4321,
+        "owner_process_start": "start-old",
     }
 
     assert process_identity.owner_liveness(metadata) == "gone"
@@ -80,7 +80,7 @@ def test_owner_liveness_treats_reused_pid_as_gone(monkeypatch) -> None:
 
 def test_owner_liveness_is_unverified_without_recorded_identity(monkeypatch) -> None:
     monkeypatch.setattr(process_identity, "probe_process", lambda pid: ("running", None))
-    metadata = {"host": socket.gethostname(), "creator_pid": 4321}
+    metadata = {"host": socket.gethostname(), "owner_pid": 4321}
 
     assert process_identity.owner_liveness(metadata) == "running-unverified"
 
@@ -89,8 +89,8 @@ def test_owner_liveness_is_unverified_when_identity_is_unreadable(monkeypatch) -
     monkeypatch.setattr(process_identity, "probe_process", lambda pid: ("running", None))
     metadata = {
         "host": socket.gethostname(),
-        "creator_pid": 4321,
-        "creator_process_start": "start-old",
+        "owner_pid": 4321,
+        "owner_process_start": "start-old",
     }
 
     assert process_identity.owner_liveness(metadata) == "running-unverified"
@@ -98,14 +98,14 @@ def test_owner_liveness_is_unverified_when_identity_is_unreadable(monkeypatch) -
 
 def test_owner_liveness_reports_gone_for_a_dead_process(monkeypatch) -> None:
     monkeypatch.setattr(process_identity, "probe_process", lambda pid: ("gone", None))
-    metadata = {"host": socket.gethostname(), "creator_pid": 4321}
+    metadata = {"host": socket.gethostname(), "owner_pid": 4321}
 
     assert process_identity.owner_liveness(metadata) == "gone"
 
 
 def test_owner_liveness_reports_unknown_when_the_platform_cannot_tell(monkeypatch) -> None:
     monkeypatch.setattr(process_identity, "probe_process", lambda pid: ("unknown", None))
-    metadata = {"host": socket.gethostname(), "creator_pid": 4321}
+    metadata = {"host": socket.gethostname(), "owner_pid": 4321}
 
     assert process_identity.owner_liveness(metadata) == "unknown"
 
@@ -271,3 +271,14 @@ def test_probe_reports_unknown_when_the_operating_system_refuses(monkeypatch) ->
 
 def test_proc_stat_path_points_at_the_kernel_interface() -> None:
     assert process_identity.proc_stat_path(42).as_posix() == "/proc/42/stat"
+
+
+def test_owner_liveness_ignores_the_ephemeral_creator_pid() -> None:
+    """The acquiring CLI process is dead on every healthy lock.
+
+    Reporting on it would mark live locks abandoned, so liveness is claimed
+    only for a process the caller explicitly nominates.
+    """
+    metadata = {"host": socket.gethostname(), "creator_pid": os.getpid()}
+
+    assert process_identity.owner_liveness(metadata) == "unknown"

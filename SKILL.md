@@ -100,10 +100,20 @@ Every force-clear is appended to `audit.jsonl` in the per-user state directory b
 
 `check` reports `owner pid: <pid> (<state>)`, where state is one of:
 
-- **gone** - no such process, or the pid belongs to a different process than the one that acquired the lock. Strong evidence of abandonment, and the evidence a force-clear wants.
-- **running** - the acquiring process is still alive, confirmed against its recorded start identity.
+- **gone** - no such process, or the pid belongs to a *different* process than the one nominated. Strong evidence of abandonment, and the evidence a force-clear wants.
+- **running** - the nominated process is alive, confirmed against its recorded start identity.
 - **running-unverified** - something holds that pid, but its identity could not be confirmed. Treat as running.
-- **unknown** - the lock was taken on another host, or this platform cannot answer. Start identity is read on Linux and Windows only.
+- **unknown** - no process was nominated (the default), the lock was taken on another host, or this platform cannot answer. Start identity is read on Linux and Windows only.
+
+Liveness is **opt-in**, and `unknown` is the default for good reason. Pass `--owner-pid` at acquire time only for a process that outlives the command:
+
+```bash
+python <script> acquire <path> --reason "..." --duration 30m --owner-pid $AGENT_SESSION_PID
+```
+
+The `acquire` command's own process exits the moment it writes the marker, so recording *it* would report `gone` for every healthy lock and invite force-clearing live work. Nominate the agent session or supervising process, or nominate nothing.
+
+On Windows, pass a real Win32 pid. `$$` inside Git Bash or MSYS is that shell's own emulated pid from a separate namespace, and probing it reports `gone` for a perfectly live shell. Python's `os.getpid()` and PowerShell's `$PID` give the Win32 value.
 
 Never force-clear merely because `expected_until` passed. A dead owner process is evidence for your judgement, never an automatic verdict: `recommendation` deliberately ignores it.
 

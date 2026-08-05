@@ -320,6 +320,7 @@ def build_metadata(
     strategy: str,
     owner: str | None,
     session: str | None,
+    owner_pid: int | None,
 ) -> dict[str, Any]:
     now = utc_now()
     return {
@@ -336,7 +337,12 @@ def build_metadata(
         "host": socket.gethostname(),
         "platform": platform.system(),
         "creator_pid": os.getpid(),
-        "creator_process_start": process_start_identity(os.getpid()),
+        # A process whose death means this lock is abandoned, nominated by the
+        # caller. Left absent by default: `creator_pid` above is this
+        # short-lived CLI invocation, which is dead moments later on every
+        # healthy lock, so it can never stand in for the owner.
+        "owner_pid": owner_pid,
+        "owner_process_start": None if owner_pid is None else process_start_identity(owner_pid),
         "created_at": format_time(now),
         "updated_at": format_time(now),
         "expected_until": format_time(now + duration),
@@ -351,6 +357,7 @@ def acquire(
     strategy: str = "auto",
     owner: str | None = None,
     session: str | None = None,
+    owner_pid: int | None = None,
 ) -> dict[str, Any]:
     root = resolve_root(path)
     marker = marker_directory(root)
@@ -367,6 +374,7 @@ def acquire(
             strategy=strategy,
             owner=owner,
             session=session,
+            owner_pid=owner_pid,
         )
         try:
             atomic_write_json(metadata_path(root), metadata)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import timedelta
 from pathlib import Path
@@ -120,3 +121,23 @@ def test_owner_release_is_unaffected(repository: Path) -> None:
 
     assert core.release(repository, lock_id=metadata["lock_id"])
     assert not audit.audit_path().exists()
+
+
+def test_acquire_records_no_owner_process_by_default(repository: Path) -> None:
+    metadata = hold(repository)
+
+    assert metadata["owner_pid"] is None
+    assert metadata["owner_process_start"] is None
+    assert core.inspect(repository)["owner_process"] == "unknown"
+
+
+def test_acquire_records_a_nominated_owner_process(repository: Path) -> None:
+    metadata = core.acquire(
+        repository,
+        reason="busy",
+        duration=timedelta(minutes=5),
+        owner_pid=os.getpid(),
+    )
+
+    assert metadata["owner_pid"] == os.getpid()
+    assert core.inspect(repository)["owner_process"] in {"running", "running-unverified"}

@@ -25,6 +25,8 @@ python scripts/project-lock.py release /path/to/project --force \
 
 `--reason` is recorded and `--expect-lock-id` is a compare-and-swap, so an override that races a replacement lock fails instead of discarding it. Every force-clear is appended to `audit.jsonl` in the per-user state directory *before* the lock is removed, making "no unaudited force-clear" an invariant rather than a best effort. `check` reports the owner process as `gone`, `running`, `running-unverified`, or `unknown`, comparing the live process against a start identity recorded at acquire time so a reused pid reads as `gone` rather than as a live owner. That is evidence for a human decision, never an automatic verdict.
 
+Liveness is opt-in via `acquire --owner-pid`, and defaults to `unknown`. Nominate only a process that outlives the command, such as the agent session: the `acquire` process itself exits as soon as it writes the marker, so tracking it would report `gone` on every healthy lock.
+
 ## Decisions
 
 - Wait for short work, same-branch changes, maintenance, merges, rebases, and shared mutable state.

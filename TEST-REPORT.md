@@ -1,10 +1,10 @@
-skills-project-lock test report - 2026-08-05T21:36:00Z
+skills-project-lock test report - 2026-08-05T22:05:00Z
 ========================================================
 
-Git:      main @ 558a81e (pre-commit working tree)
+Git:      main @ 90334bb (pre-commit working tree)
 Status:   PASS (3 machine-local failures, see below)
-Tests:    130 passed, 3 failed, 0 skipped
-Coverage: 636/638 statements, 178/180 branches (99.5%) on scripts/project_lock
+Tests:    133 passed, 3 failed, 0 skipped
+Coverage: 637/639 statements, 178/180 branches (99.5%) on scripts/project_lock
 Lint:     ruff check: clean
           ruff format --check: clean
           markdownlint-cli2: 0 findings on tracked files
@@ -39,6 +39,17 @@ machine, not of the code. CI (ubuntu-latest) is unaffected and enforces the
 - `core.py:90` is the "walked to the filesystem root without finding `.git`"
   return, unreachable on that host for the same reason.
 - `core.py:132` is the `os.name != "nt"` branch, unreachable on Windows.
+
+Smoke (SMOKE.md, live installed skill)
+--------------------------------------
+
+- Force-clear without `--reason` refused; exit 3.
+- `check` on a lock with no nominated process: `owner pid: - (unknown)`.
+- `acquire --owner-pid <live Win32 pid>` then `check`: `running`.
+- Same lock after killing that process: `gone`, while `advice` still reads
+  "wait, then check again" rather than declaring the lock free.
+- Git-admin denial and worktree-content allow exercised by the hook suite
+  against real `git worktree` fixtures.
 
 Markdownlint reports findings under `.superpowers/sdd/`, which is git-ignored
 scaffolding (`.superpowers/sdd/.gitignore` contains `*`) and never present in

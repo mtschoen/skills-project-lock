@@ -32,6 +32,7 @@ def test_cli_lifecycle(
         strategy="auto",
         owner="agent",
         session="session",
+        owner_pid=None,
         json=False,
     )
     assert cli.command_acquire(arguments) == 0
@@ -86,6 +87,7 @@ def test_json_commands_and_list(
         strategy="auto",
         owner="agent",
         session=None,
+        owner_pid=None,
         json=True,
     )
     assert cli.command_acquire(arguments) == 0

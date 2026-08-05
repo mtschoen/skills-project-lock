@@ -126,16 +126,22 @@ def owner_liveness(metadata: dict[str, Any]) -> str:
     One of `running`, `running-unverified`, `gone`, or `unknown`. Only `gone`
     is evidence of abandonment; `running-unverified` means a process holds the
     PID but its identity could not be confirmed against the recorded one.
+
+    Reads `owner_pid`, which a caller supplies explicitly, and never
+    `creator_pid`. The acquiring CLI process exits as soon as it writes the
+    marker, so its pid is dead for every healthy lock and would report `gone`
+    on all of them. Absent an explicitly nominated process, the honest answer
+    is `unknown`.
     """
     if metadata.get("host") != socket.gethostname():
         return "unknown"
-    pid = metadata.get("creator_pid")
+    pid = metadata.get("owner_pid")
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
         return "unknown"
     state, identity = probe_process(pid)
     if state != "running":
         return state
-    recorded = metadata.get("creator_process_start")
+    recorded = metadata.get("owner_process_start")
     if not recorded or not identity:
         return "running-unverified"
     return "running" if identity == recorded else "gone"
