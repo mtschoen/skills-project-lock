@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -312,23 +313,31 @@ def default_owner() -> str:
     return f"{agent or 'agent'}@{socket.gethostname()}"
 
 
+@dataclass(frozen=True)
+class Claimant:
+    """Who is taking the lock, and which process death would abandon it."""
+
+    owner: str | None = None
+    session: str | None = None
+    owner_pid: int | None = None
+
+
 def build_metadata(
     root: Path,
     *,
     reason: str,
     duration: timedelta,
     strategy: str,
-    owner: str | None,
-    session: str | None,
-    owner_pid: int | None,
+    claimant: Claimant,
 ) -> dict[str, Any]:
     now = utc_now()
+    owner_pid = claimant.owner_pid
     return {
         "version": PROTOCOL_VERSION,
         "lock_id": str(uuid.uuid4()),
         "root": str(root),
-        "owner": owner or default_owner(),
-        "session": session
+        "owner": claimant.owner or default_owner(),
+        "session": claimant.session
         or os.environ.get("CLAUDE_SESSION_ID")
         or os.environ.get("PI_SESSION_ID"),
         "reason": reason,
@@ -372,9 +381,7 @@ def acquire(
             reason=reason,
             duration=duration,
             strategy=strategy,
-            owner=owner,
-            session=session,
-            owner_pid=owner_pid,
+            claimant=Claimant(owner=owner, session=session, owner_pid=owner_pid),
         )
         try:
             atomic_write_json(metadata_path(root), metadata)
