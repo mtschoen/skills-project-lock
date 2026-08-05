@@ -1,10 +1,10 @@
 skills-project-lock test report - 2026-08-05T22:05:00Z
 ========================================================
 
-Git:      main @ 90334bb (pre-commit working tree)
+Git:      main @ fbc6588 (pre-commit working tree)
 Status:   PASS (3 machine-local failures, see below)
-Tests:    133 passed, 3 failed, 0 skipped
-Coverage: 637/639 statements, 178/180 branches (99.5%) on scripts/project_lock
+Tests:    143 passed, 3 failed, 0 skipped
+Coverage: 656/658 statements, 186/188 branches (99.5%) on scripts/project_lock
 Lint:     ruff check: clean
           ruff format --check: clean
           markdownlint-cli2: 0 findings on tracked files
@@ -48,8 +48,10 @@ Smoke (SMOKE.md, live installed skill)
 - `acquire --owner-pid <live Win32 pid>` then `check`: `running`.
 - Same lock after killing that process: `gone`, while `advice` still reads
   "wait, then check again" rather than declaring the lock free.
-- Git-admin denial and worktree-content allow exercised by the hook suite
-  against real `git worktree` fixtures.
+- Git-admin ownership, all seven cases against real `git worktree` fixtures:
+  idle repo allows `config`, `info/exclude` and `hooks/pre-commit`; holding the
+  main checkout allows `config`; another session holding main denies; holding
+  only a linked worktree denies; that worktree's own content still allows.
 
 Markdownlint reports findings under `.superpowers/sdd/`, which is git-ignored
 scaffolding (`.superpowers/sdd/.gitignore` contains `*`) and never present in

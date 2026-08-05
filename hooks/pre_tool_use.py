@@ -31,7 +31,12 @@ from project_lock.core import (
 )
 
 # aislop-ignore-next-line ai-slop/hallucinated-import -- sys.path-resolved sibling; stdlib-only
-from project_lock.git_admin import is_git_admin_path
+from project_lock.git_admin import (
+    governing_checkout,
+    is_git_admin_path,
+    lock_at,
+    repository_is_idle,
+)
 
 FILE_TOOL_PATH_KEYS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
 ALLOW = 0
@@ -89,14 +94,39 @@ def acquire_recipe(target: str, session_id: str) -> str:
     )
 
 
-def git_admin_refusal(target: str) -> str:
+def git_admin_refusal(target: str, checkout: Path, session_id: str) -> str:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "project-lock.py"
+    session_flag = f" --session {session_id}" if session_id else ""
     return (
         f"project-lock: {target} is Git administration state\n"
-        "  A project lock covers worktree content. Refs, config and the worktree\n"
-        "  registry are shared by every worktree of the repository, so no single\n"
-        "  worktree's lock can authorize a direct write to them.\n"
-        "  Use a git command instead (git config, git branch, git worktree, ...)."
+        f"  It is shared by every worktree, and owned by the checkout at {checkout}.\n"
+        "  Another worktree of this repository is locked, so claim that checkout\n"
+        "  first and you are in charge of the repository:\n"
+        f'  python "{script}" acquire "{checkout}" --reason "<why>" '
+        f"--duration 30m{session_flag}\n"
+        "  Then retry this edit."
     )
+
+
+def check_git_admin(target: str, session_id: str) -> tuple[int, str]:
+    """Authorize a write to Git administration state.
+
+    Ownership rests with the governing checkout: holding its lock means being
+    in charge of the repository and free to edit `.git` directly. This is what
+    makes hand-editing possible for the cases Git offers no command for
+    (`info/exclude`, `hooks/`, a `config` too malformed for `git config`).
+    """
+    checkout = governing_checkout(target)
+    lock = lock_at(checkout)
+    if lock is not None:
+        if lock_is_foreign(lock, session_id):
+            return DENY, describe_lock({"root": str(checkout), "lock": lock})
+        return ALLOW, ""
+    if repository_is_idle(checkout):
+        # Nobody is working anywhere in this repository, so there is no one to
+        # coordinate with and nothing to claim.
+        return ALLOW, ""
+    return DENY, git_admin_refusal(target, checkout, session_id)
 
 
 def resolve_target(target: str, cwd: str | None) -> str:
@@ -113,10 +143,11 @@ def check_file_tool(payload: dict) -> tuple[int, str]:
         return ALLOW, ""
     target = resolve_target(target, payload.get("cwd"))
     session_id = payload.get("session_id", "")
-    # Refused ahead of the lock check, and regardless of who holds what: this
-    # state is shared by every worktree, so no worktree lock speaks for it.
+    # Resolved ahead of the ordinary lock check: this state is shared by every
+    # worktree, so it answers to the governing checkout rather than to whatever
+    # lock happens to sit above the path.
     if is_git_admin_path(target):
-        return DENY, git_admin_refusal(target)
+        return check_git_admin(target, session_id)
     governed = governing_lock(target)
     if governed is None:
         # No lock is registered anywhere above this path. Allow only true

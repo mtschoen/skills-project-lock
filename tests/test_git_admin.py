@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
-from project_lock import git_admin
+from project_lock import core, git_admin
 
 
 def test_common_git_directory_is_admin_state(nested_worktree_repo) -> None:
@@ -88,3 +89,58 @@ def test_reported_but_absent_git_directory_is_skipped(nested_worktree_repo, monk
     monkeypatch.setattr(git_admin, "run_git", lambda path, *arguments: str(main / "no-such-dir"))
 
     assert git_admin.git_administration_roots(main) == []
+
+
+def test_governing_checkout_of_repository_state_is_the_main_worktree(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+
+    assert git_admin.governing_checkout(main / ".git" / "config") == git_admin.canonical_path(main)
+    assert git_admin.governing_checkout(
+        main / ".git" / "worktrees" / "sibling" / "HEAD"
+    ) == git_admin.canonical_path(main)
+
+
+def test_lock_at_reads_only_the_exact_root(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    nested = nested_worktree_repo["nested"]
+    metadata = core.acquire(main, reason="held", duration=timedelta(minutes=5))
+
+    assert git_admin.lock_at(git_admin.canonical_path(main))["lock_id"] == metadata["lock_id"]
+    assert git_admin.lock_at(git_admin.canonical_path(nested)) is None
+
+
+def test_repository_worktrees_lists_every_registered_checkout(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+
+    roots = git_admin.repository_worktrees(main)
+
+    for key in ("main", "nested", "sibling"):
+        assert git_admin.canonical_path(nested_worktree_repo[key]) in roots
+
+
+def test_repository_worktrees_is_empty_without_git(nested_worktree_repo, monkeypatch):
+    monkeypatch.setattr(git_admin, "run_git", lambda *arguments: None)
+
+    assert git_admin.repository_worktrees(nested_worktree_repo["main"]) == []
+
+
+def test_repository_is_idle_until_any_worktree_is_locked(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    assert git_admin.repository_is_idle(main)
+
+    core.acquire(nested_worktree_repo["sibling"], reason="held", duration=timedelta(minutes=5))
+
+    assert not git_admin.repository_is_idle(main)
+
+
+def test_repository_is_idle_falls_back_to_the_checkout_without_git(
+    nested_worktree_repo, monkeypatch
+):
+    """With no inventory available, the checkout itself is still consulted."""
+    main = nested_worktree_repo["main"]
+    monkeypatch.setattr(git_admin, "run_git", lambda *arguments: None)
+    assert git_admin.repository_is_idle(main)
+
+    core.acquire(main, reason="held", duration=timedelta(minutes=5))
+
+    assert not git_admin.repository_is_idle(main)

@@ -365,27 +365,61 @@ def test_bash_read_only_git_log_referencing_foreign_absolute_path_allows(
     assert result.returncode == 0
 
 
-def test_git_config_write_is_denied_even_to_the_lock_holder(nested_worktree_repo):
-    """Repository state is shared by every worktree, so no worktree lock owns it."""
+def test_git_config_write_allowed_when_nothing_is_locked(nested_worktree_repo):
+    """An idle repository has nobody to coordinate with."""
     main = nested_worktree_repo["main"]
-    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    result = run_hook(edit_payload(main / ".git" / "config", session_id="session-a"))
+    assert result.returncode == 0
+
+
+def test_git_config_write_allowed_to_the_main_worktree_holder(nested_worktree_repo):
+    """Holding the main checkout means being in charge of the repository."""
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="in charge", duration=timedelta(minutes=5), session="session-a")
+    result = run_hook(edit_payload(main / ".git" / "config", session_id="session-a"))
+    assert result.returncode == 0
+
+
+def test_git_config_write_denied_when_another_session_holds_main(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="busy", duration=timedelta(minutes=5), session="session-b")
     result = run_hook(edit_payload(main / ".git" / "config", session_id="session-a"))
     assert result.returncode == 2
-    assert "Git administration state" in result.stderr
 
 
-def test_private_worktree_metadata_write_is_denied(nested_worktree_repo):
-    main = nested_worktree_repo["main"]
-    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
-    target = main / ".git" / "worktrees" / "sibling" / "HEAD"
-    result = run_hook(edit_payload(target, session_id="session-a"))
-    assert result.returncode == 2
-
-
-def test_linked_worktree_git_marker_write_is_denied(nested_worktree_repo):
+def test_git_config_write_denied_to_a_linked_worktree_holder(nested_worktree_repo):
+    """A sibling worktree's lock does not confer repository-wide authority."""
     sibling = nested_worktree_repo["sibling"]
     core.acquire(sibling, reason="mine", duration=timedelta(minutes=5), session="session-a")
-    result = run_hook(edit_payload(sibling / ".git", session_id="session-a"))
+    main = nested_worktree_repo["main"]
+    result = run_hook(edit_payload(main / ".git" / "config", session_id="session-a"))
+    assert result.returncode == 2
+    assert "claim that checkout" in result.stderr
+
+
+def test_hand_editable_paths_reachable_by_the_main_holder(nested_worktree_repo):
+    """Git offers no command for these, so they must stay hand-editable."""
+    main = nested_worktree_repo["main"]
+    core.acquire(main, reason="in charge", duration=timedelta(minutes=5), session="session-a")
+    for target in (
+        main / ".git" / "info" / "exclude",
+        main / ".git" / "hooks" / "pre-commit",
+    ):
+        result = run_hook(edit_payload(target, session_id="session-a"))
+        assert result.returncode == 0, f"{target} should be reachable"
+
+
+def test_hand_editable_paths_reachable_when_repository_is_idle(nested_worktree_repo):
+    main = nested_worktree_repo["main"]
+    result = run_hook(edit_payload(main / ".git" / "info" / "exclude", session_id="session-a"))
+    assert result.returncode == 0
+
+
+def test_private_worktree_metadata_answers_to_the_main_checkout(nested_worktree_repo):
+    sibling = nested_worktree_repo["sibling"]
+    core.acquire(sibling, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    target = nested_worktree_repo["main"] / ".git" / "worktrees" / "sibling" / "HEAD"
+    result = run_hook(edit_payload(target, session_id="session-a"))
     assert result.returncode == 2
 
 
@@ -398,10 +432,9 @@ def test_worktree_content_write_still_allowed_to_the_lock_holder(nested_worktree
 
 def test_git_admin_denial_respects_warn_mode(nested_worktree_repo):
     main = nested_worktree_repo["main"]
-    core.acquire(main, reason="mine", duration=timedelta(minutes=5), session="session-a")
+    core.acquire(main, reason="busy", duration=timedelta(minutes=5), session="session-b")
     result = run_hook(
         edit_payload(main / ".git" / "config", session_id="session-a"),
         {"PROJECT_LOCK_ENFORCE": "warn"},
     )
     assert result.returncode == 0
-    assert "Git administration state" in result.stderr
