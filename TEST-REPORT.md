@@ -1,15 +1,15 @@
-skills-project-lock test report - 2026-08-05T22:05:00Z
+skills-project-lock test report - 2026-08-05T23:10:00Z
 ========================================================
 
-Git:      main @ 51a0fe8 (pre-commit working tree)
-Status:   PASS (3 machine-local failures, see below)
-Tests:    145 passed, 3 failed, 0 skipped
-Coverage: 661/663 statements, 190/192 branches (99.5%) on scripts/project_lock
+Git:      main @ 4641e0e (pre-commit working tree)
+Status:   PASS
+Tests:    148 passed, 0 failed, 0 skipped
+Coverage: 662/663 statements, 191/192 branches (99.8%) on scripts/project_lock
 Lint:     ruff check: clean
           ruff format --check: clean
           markdownlint-cli2: 0 findings on tracked files
           agentskills validate (skills-ref 0.1.1): valid
-          aislop ci: 0 errors, 0 warnings
+          aislop ci: exit 0
 
 Commands
 --------
@@ -21,6 +21,19 @@ ruff format --check scripts tests hooks
 npx --yes markdownlint-cli2
 uvx --from skills-ref==0.1.1 agentskills validate
 ```
+
+Coverage note
+-------------
+
+The single uncovered line is `core.py:132`, the `os.name != "nt"` arm of
+`_temp_roots()` that adds the POSIX temp mounts. It is unreachable on Windows
+and covered on Linux, where CI (ubuntu-latest) enforces the 100% gate.
+
+An earlier revision of this report recorded three failures and a second
+uncovered line as permanent machine-local artifacts. They were caused by an
+empty stray `~/.git` on the authoring host, which made `has_git_ancestor()`
+true for the whole home tree and so disabled the scratch carve-out under
+`%TEMP%`. That directory was deleted on 2026-08-05 and all three now pass.
 
 Performance (chromium: 500,533 tracked files, 1.5 GB .git)
 ----------------------------------------------------------
@@ -43,24 +56,6 @@ unchanged by this feature.
 Asking `rev-parse` for `--git-dir` and `--git-common-dir` in one invocation
 costs the same as asking for either alone, which took the admin path from
 three subprocesses to two (43 ms to 32 ms).
-
-Machine-local failures
-----------------------
-
-The 3 failures and the 2 uncovered lines are artifacts of the authoring
-machine, not of the code. CI (ubuntu-latest) is unaffected and enforces the
-100% gate.
-
-- `test_nearest_worktree_root`, and both
-  `test_scratch_path_with_no_git_ancestor_under_temp_allows_edit` variants:
-  an empty stray `~/.git` on that Windows host makes `has_git_ancestor()`
-  true for the whole home tree, including `%TEMP%`, which disables the
-  scratch carve-out. This is the exact hazard documented under "Known
-  limitations of the scratch carve-out" in SKILL.md. All three were verified
-  to fail identically on the unmodified parent commit.
-- `core.py:90` is the "walked to the filesystem root without finding `.git`"
-  return, unreachable on that host for the same reason.
-- `core.py:132` is the `os.name != "nt"` branch, unreachable on Windows.
 
 Smoke (SMOKE.md, live installed skill)
 --------------------------------------
