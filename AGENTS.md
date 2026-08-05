@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository ships the `project-lock` agent skill and its dependency-free Python command-line tool. Lock compatibility is a public protocol: preserve backward readability when changing `owner.json`.
+This repository ships the `project-lock` skill and its dependency-free Python command-line tool. Lock compatibility is a public protocol: preserve backward readability when changing `owner.json`.
 
 ## Commands
 
