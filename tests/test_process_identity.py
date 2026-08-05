@@ -137,7 +137,10 @@ class FakeKernel32:
 
 def install_fake_windows(monkeypatch, kernel32, last_error=0):
     monkeypatch.setattr(process_identity.ctypes, "WinDLL", lambda *a, **k: kernel32, raising=False)
-    monkeypatch.setattr(process_identity.ctypes, "get_last_error", lambda: last_error)
+    # Both names are Windows-only on the real module, so neither may be assumed present.
+    monkeypatch.setattr(
+        process_identity.ctypes, "get_last_error", lambda: last_error, raising=False
+    )
 
 
 def test_parse_proc_stat_reads_field_22() -> None:
