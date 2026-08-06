@@ -1,5 +1,0 @@
-- [x] Define versioned lock protocol
-- [x] Implement acquire, check, renew, release, wait, list, and watch
-- [x] Add cross-platform tests and CI
-- [ ] Evaluate a native dashboard after real-world use
-- [x] Add harness-specific enforcement hooks if cooperative use proves insufficient
